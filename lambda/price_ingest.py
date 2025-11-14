@@ -146,6 +146,7 @@ def fetch_all_ticks(symbol: str) -> pd.DataFrame:
     Pobiera wszystkie ticki z tabeli ticków.
     Uwaga: dla dużej ilości danych trzeba będzie zrobić pętlę po LastEvaluatedKey,
     tutaj dla prostoty bierzemy jedną stronę.
+    (Nie jest używane w handlerze, zostawione np. do backfilli.)
     """
     pk = f"{symbol}#tick"
     resp = TICKS_TABLE.query(
@@ -155,6 +156,38 @@ def fetch_all_ticks(symbol: str) -> pd.DataFrame:
     items = resp.get("Items", [])
     if not items:
         return pd.DataFrame(columns=["timestamp","price","volume"])
+
+    rows = []
+    for it in items:
+        rows.append({
+            "timestamp": pd.to_datetime(it["ts"], utc=True),
+            "price": float(it["price"]),
+            "volume": float(it.get("volume", 0)),
+        })
+    return pd.DataFrame(rows).sort_values("timestamp")
+
+def fetch_ticks_since(symbol: str, since_iso: str | None) -> pd.DataFrame:
+    """
+    Pobiera ticki od zadanego timestampu (ts >= since_iso).
+    Jeśli since_iso = None, pobiera wszystkie ticki (jak fetch_all_ticks).
+    Uwaga: nadal bez paginacji – jedna strona wyniku z DynamoDB.
+    """
+    pk = f"{symbol}#tick"
+
+    if since_iso:
+        resp = TICKS_TABLE.query(
+            KeyConditionExpression=Key("pk").eq(pk) & Key("ts").gte(since_iso),
+            ScanIndexForward=True,
+        )
+    else:
+        resp = TICKS_TABLE.query(
+            KeyConditionExpression=Key("pk").eq(pk),
+            ScanIndexForward=True,
+        )
+
+    items = resp.get("Items", [])
+    if not items:
+        return pd.DataFrame(columns=["timestamp", "price", "volume"])
 
     rows = []
     for it in items:
@@ -312,7 +345,7 @@ def handler(event, context):
         "TICKS_TABLE_NAME": TICKS_TABLE_NAME,
         "SYMBOL": SYMBOL,
         "FMP_SYMBOL": FMP_SYMBOL,
-        # "FMP_API_KEY": "hidden"  # gdybyś bardzo chciał zaznaczyć
+        # "FMP_API_KEY": "hidden"
     })
 
     # 1) Pobierz tick z FMP i zapisz do brent_ticks
@@ -340,17 +373,28 @@ def handler(event, context):
     n_tick = insert_tick(SYMBOL, df_tick_last)
     log.info({"step": "insert_tick", "inserted_tick": int(n_tick)})
 
-    # 2) Zbuduj 5m z CAŁEJ historii ticków, potem odetnij to co już masz
-    df_ticks_all = fetch_all_ticks(SYMBOL)
+    # 2) Zbuduj 5m tylko z najnowszych ticków (od ostatniej świeczki 5m - 5 minut)
+    last5 = last_ts_iso(SYMBOL, "5m")
+
+    if last5:
+        last5_dt = pd.to_datetime(last5, utc=True)
+        since_dt = last5_dt - pd.Timedelta(minutes=5)
+        since_iso = since_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    else:
+        # brak świeczek 5m w DDB -> ładujemy wszystkie ticki
+        since_iso = None
+
+    df_ticks_recent = fetch_ticks_since(SYMBOL, since_iso)
     log.info({
-        "step": "fetch_all_ticks",
-        "ticks_count": int(len(df_ticks_all)),
-        "ts_tick_min": None if df_ticks_all.empty else str(df_ticks_all["timestamp"].min()),
-        "ts_tick_max": None if df_ticks_all.empty else str(df_ticks_all["timestamp"].max()),
+        "step": "fetch_ticks_recent",
+        "last5_in_ddb": last5,
+        "since_iso": since_iso,
+        "ticks_count": int(len(df_ticks_recent)),
+        "ts_tick_min": None if df_ticks_recent.empty else str(df_ticks_recent["timestamp"].min()),
+        "ts_tick_max": None if df_ticks_recent.empty else str(df_ticks_recent["timestamp"].max()),
     })
 
-    last5 = last_ts_iso(SYMBOL, "5m")
-    df5_full = ticks_to_ohlc(df_ticks_all, "5min")
+    df5_full = ticks_to_ohlc(df_ticks_recent, "5min")
     df5_new  = filter_new(df5_full, last5)
     n5 = upsert_batch(SYMBOL, "5m", df5_new)
     log.info({
@@ -378,7 +422,7 @@ def handler(event, context):
     # 4) 1h -> 4h
     df1h_all = fetch_all_ohlc(SYMBOL, "1h")
     last4h = last_ts_iso(SYMBOL, "4h")
-    df4h_full = resample_ohlc(df1h_all, "4H")
+    df4h_full = resample_ohlc(df1h_all, "4h")  # małe 'h' zamiast 'H'
     df4h_new  = filter_new(df4h_full, last4h)
     n4 = upsert_batch(SYMBOL, "4h", df4h_new)
     log.info({
