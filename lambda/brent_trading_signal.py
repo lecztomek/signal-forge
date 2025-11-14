@@ -145,103 +145,232 @@ def atr(highs, lows, closes, period=14):
     return atr_vals
 
 
-# --------- Logika trendu na 1D ---------
+# --------- Logika trendu na 1D (łagodniejsza, na zamkniętej świecy) ---------
 def determine_daily_bias(daily_candles):
     """
     Zwraca 'LONG', 'SHORT' albo 'NONE'.
+    Bias liczony na PRZEDOSTATNIEJ świecy (ostatnia może być w trakcie).
+      - LONG: EMA20 > EMA50 i RSI > 50
+      - SHORT: EMA20 < EMA50 i RSI < 50
     """
     print(f"[DEBUG] determine_daily_bias: candles_1d_count={len(daily_candles)}")
     closes = [c["close"] for c in daily_candles]
     ema20 = ema(closes, 20)
     ema50 = ema(closes, 50)
-    ema200 = ema(closes, 200)
     rsi14 = rsi(closes, 14)
 
-    if len(closes) == 0:
-        print("[DEBUG] determine_daily_bias: no closes -> BIAS=NONE")
+    if len(closes) < 2:
+        print("[DEBUG] determine_daily_bias: not enough candles -> BIAS=NONE")
         return "NONE"
 
-    last_idx = len(closes) - 1
-    c = closes[last_idx]
-    e20 = ema20[last_idx]
-    e50 = ema50[last_idx]
-    e200 = ema200[last_idx]
-    r = rsi14[last_idx]
+    # używamy przedostatniej świecy – zamkniętej
+    idx = len(closes) - 2
 
-    print(f"[DEBUG] 1D last close={c}, ema20={e20}, ema50={e50}, ema200={e200}, rsi14={r}")
+    c = closes[idx]
+    e20 = ema20[idx]
+    e50 = ema50[idx]
+    r = rsi14[idx]
 
-    # Jeśli za mało danych na EMA200/EMA50 itd.
-    if e20 is None or e50 is None or e200 is None or r is None:
+    print(f"[DEBUG] 1D (closed) idx={idx}, close={c}, ema20={e20}, ema50={e50}, rsi14={r}")
+
+    if e20 is None or e50 is None or r is None:
         print("[DEBUG] determine_daily_bias: some indicator is None -> BIAS=NONE")
         return "NONE"
 
-    # proste reguły trendu
-    if c > e200 and e20 > e50 and r > 55:
-        print("[DEBUG] determine_daily_bias: conditions for LONG met")
+    if e20 > e50 and r > 50:
+        print("[DEBUG] determine_daily_bias: conditions for LONG met (ema20>ema50, rsi>50)")
         return "LONG"
-    elif c < e200 and e20 < e50 and r < 45:
-        print("[DEBUG] determine_daily_bias: conditions for SHORT met")
+    elif e20 < e50 and r < 50:
+        print("[DEBUG] determine_daily_bias: conditions for SHORT met (ema20<ema50, rsi<50)")
         return "SHORT"
     else:
-        print("[DEBUG] determine_daily_bias: no strong trend -> BIAS=NONE")
+        print("[DEBUG] determine_daily_bias: no clear ema20/ema50 + rsi trend -> BIAS=NONE")
         return "NONE"
 
 
-# --------- Logika 1H ---------
+# --------- Wsparcie / opór z 1H (swings + clustering) ---------
+def detect_swings(candles, lookback=80, swing_window=2):
+    """
+    Detekcja swing high / swing low na 1H:
+    - swing high: high większy niż w oknie +/- swing_window
+    - swing low: low mniejszy niż w oknie +/- swing_window
+    Zwraca listy poziomów swing_highs, swing_lows.
+    """
+    if len(candles) == 0:
+        return [], []
+
+    if len(candles) < lookback:
+        recent = candles
+    else:
+        recent = candles[-lookback:]
+
+    highs = [c["high"] for c in recent]
+    lows = [c["low"] for c in recent]
+
+    swing_highs = []
+    swing_lows = []
+
+    for i in range(swing_window, len(recent) - swing_window):
+        local_high = max(highs[i - swing_window:i + swing_window + 1])
+        local_low = min(lows[i - swing_window:i + swing_window + 1])
+
+        if highs[i] == local_high and highs[i] > highs[i - 1] and highs[i] > highs[i + 1]:
+            swing_highs.append(highs[i])
+        if lows[i] == local_low and lows[i] < lows[i - 1] and lows[i] < lows[i + 1]:
+            swing_lows.append(lows[i])
+
+    print(f"[DEBUG] detect_swings: found {len(swing_lows)} swing_lows, {len(swing_highs)} swing_highs")
+    return swing_highs, swing_lows
+
+
+def cluster_levels(levels, tolerance_pct=0.002):
+    """
+    Grupuje poziomy (np. swing highs/lows) w strefy:
+      - jeśli poziomy są blisko siebie (w %), łączymy je w jedną strefę
+      - zwracamy listę: [{"level": poziom, "strength": ile swingów}, ...]
+    """
+    if not levels:
+        return []
+
+    levels_sorted = sorted(levels)
+    zones = []
+    current_cluster = [levels_sorted[0]]
+
+    for p in levels_sorted[1:]:
+        cluster_avg = sum(current_cluster) / len(current_cluster)
+        if abs(p - cluster_avg) / cluster_avg <= tolerance_pct:
+            current_cluster.append(p)
+        else:
+            level = sum(current_cluster) / len(current_cluster)
+            strength = len(current_cluster)
+            zones.append({"level": level, "strength": strength})
+            current_cluster = [p]
+
+    # ostatni klaster
+    if current_cluster:
+        level = sum(current_cluster) / len(current_cluster)
+        strength = len(current_cluster)
+        zones.append({"level": level, "strength": strength})
+
+    zones.sort(key=lambda z: z["strength"], reverse=True)
+
+    print(f"[DEBUG] cluster_levels: input={len(levels)}, zones={zones}")
+    return zones
+
+
+def calc_sr_zones(hourly_candles, lookback=80, swing_window=2, tolerance_pct=0.002):
+    """
+    Na 1H:
+      - wykrywa swing highs/lows,
+      - grupuje je w strefy S/R.
+    Zwraca:
+      support_zones (z swing_low), resistance_zones (z swing_high).
+    """
+    swing_highs, swing_lows = detect_swings(hourly_candles, lookback, swing_window)
+    resistance_zones = cluster_levels(swing_highs, tolerance_pct)
+    support_zones = cluster_levels(swing_lows, tolerance_pct)
+    print(f"[DEBUG] calc_sr_zones: support_zones={support_zones}, resistance_zones={resistance_zones}")
+    return support_zones, resistance_zones
+
+
+def find_nearest_zone(zones, price, direction="any"):
+    """
+    Znajduje najbliższą strefę względem ceny:
+      - direction='below'  -> preferuj poziomy <= price
+      - direction='above'  -> preferuj poziomy >= price
+      - direction='any'    -> dowolny najbliższy
+    Zwraca dict {"level": ..., "strength": ...} lub None.
+    """
+    if not zones:
+        return None
+
+    if direction == "below":
+        candidates = [z for z in zones if z["level"] <= price]
+    elif direction == "above":
+        candidates = [z for z in zones if z["level"] >= price]
+    else:
+        candidates = zones[:]
+
+    if not candidates:
+        candidates = zones[:]  # fallback: cokolwiek najbliżej
+
+    best = min(candidates, key=lambda z: abs(z["level"] - price))
+    print(f"[DEBUG] find_nearest_zone: price={price}, dir={direction}, best={best}")
+    return best
+
+
+# --------- Logika 1H (miękka, na zamkniętej świecy) ---------
 def check_1h_setup(hourly_candles, bias):
     """
     Sprawdza, czy 1H wspiera bias z 1D.
-    Zwraca True/False.
+    Używamy EMA o długości dostosowanej do ilości świec (min 10, max 50).
+    Warunki miękkie:
+      LONG  -> wystarczy JEDNO z: close>EMA LUB RSI>50 LUB higher low
+      SHORT -> wystarczy JEDNO z: close<EMA LUB RSI<50 LUB lower high
+    Używamy PRZEDOSTATNIEJ świecy 1H (ostatnia może być w trakcie).
     """
     print(f"[DEBUG] check_1h_setup: candles_1h_count={len(hourly_candles)}, bias={bias}")
-    if len(hourly_candles) < 5:
-        print("[DEBUG] check_1h_setup: not enough 1H candles")
+    if len(hourly_candles) < 10:
+        print("[DEBUG] check_1h_setup: not enough 1H candles (<10)")
         return False
 
     closes = [c["close"] for c in hourly_candles]
-    ema50_h = ema(closes, 50)
+
+    ema_period = min(20, max(10, len(closes) - 2))
+    print(f"[DEBUG] check_1h_setup: using ema_period={ema_period}")
+
+    ema_h = ema(closes, ema_period)
     rsi_h = rsi(closes, 14)
-    last_idx = len(closes) - 1
+
+    # używamy przedostatniej świecy 1H
+    last_idx = len(closes) - 2
 
     c = closes[last_idx]
-    e50 = ema50_h[last_idx]
+    e = ema_h[last_idx]
     r = rsi_h[last_idx]
 
-    print(f"[DEBUG] 1H last close={c}, ema50={e50}, rsi14={r}")
+    print(f"[DEBUG] 1H (closed) idx={last_idx}, close={c}, ema{ema_period}={e}, rsi14={r}")
 
-    if e50 is None or r is None:
-        print("[DEBUG] check_1h_setup: ema50 or rsi is None")
+    if e is None or r is None:
+        print("[DEBUG] check_1h_setup: ema or rsi is None")
         return False
 
-    # prosta detekcja HL / LH – bardzo uproszczona
     last_low = min(hourly_candles[last_idx - 2:last_idx + 1], key=lambda x: x["low"])["low"]
-    prev_low = min(hourly_candles[last_idx - 3:last_idx], key=lambda x: x["low"])["low"]
+    prev_low = min(hourly_candles[last_idx - 3:last_idx],   key=lambda x: x["low"])["low"]
 
     last_high = max(hourly_candles[last_idx - 2:last_idx + 1], key=lambda x: x["high"])["high"]
-    prev_high = max(hourly_candles[last_idx - 3:last_idx], key=lambda x: x["high"])["high"]
+    prev_high = max(hourly_candles[last_idx - 3:last_idx],     key=lambda x: x["high"])["high"]
 
     print(f"[DEBUG] 1H last_low={last_low}, prev_low={prev_low}, last_high={last_high}, prev_high={prev_high}")
 
     if bias == "LONG":
-        ok = c > e50 and r > 50 and last_low > prev_low
-        print(f"[DEBUG] check_1h_setup LONG -> {ok}")
+        cond_price = c > e
+        cond_rsi = r > 50
+        cond_structure = last_low >= prev_low
+        ok = cond_price or cond_rsi or cond_structure
+        print(f"[DEBUG] check_1h_setup LONG -> {ok} (price>{e}? {cond_price}, rsi>50? {cond_rsi}, HL? {cond_structure})")
         return ok
+
     elif bias == "SHORT":
-        ok = c < e50 and r < 50 and last_high < prev_high
-        print(f"[DEBUG] check_1h_setup SHORT -> {ok}")
+        cond_price = c < e
+        cond_rsi = r < 50
+        cond_structure = last_high <= prev_high
+        ok = cond_price or cond_rsi or cond_structure
+        print(f"[DEBUG] check_1h_setup SHORT -> {ok} (price<{e}? {cond_price}, rsi<50? {cond_rsi}, LH? {cond_structure})")
         return ok
+
     else:
         print("[DEBUG] check_1h_setup: bias NONE -> False")
         return False
 
 
-# --------- Logika wejścia na 5M ---------
-def check_5m_trigger(candles_5m, bias):
+# --------- Logika wejścia na 5M (z S/R) ---------
+def check_5m_trigger(candles_5m, bias, support_zones=None, resistance_zones=None):
     """
     Uproszczony trigger:
-    - dla LONG: RSI wychodzi z wyprzedania, wybicie lokalnego szczytu
-    - dla SHORT: RSI wychodzi z wykupienia, wybicie lokalnego dołka
-    Zwraca dict z informacją o sygnale lub None.
+    - dla LONG: RSI wychodzi z wyprzedania, wybicie lokalnego szczytu, BLISKO wsparcia 1H
+    - dla SHORT: RSI wychodzi z wykupienia, wybicie lokalnego dołka, BLISKO oporu 1H
+    (tu zakładamy, że ostatnia świeca 5m jest zamknięta).
     """
     print(f"[DEBUG] check_5m_trigger: candles_5m_count={len(candles_5m)}, bias={bias}")
     if len(candles_5m) < 30:
@@ -272,7 +401,6 @@ def check_5m_trigger(candles_5m, bias):
         print("[DEBUG] check_5m_trigger: some indicator is None -> no signal")
         return None
 
-    # lokalne HH/LL na ostatnich kilku świecach
     window = 5
     recent_high = max(highs[last_idx - window:last_idx])
     recent_low = min(lows[last_idx - window:last_idx])
@@ -281,19 +409,34 @@ def check_5m_trigger(candles_5m, bias):
 
     signal = None
 
+    def is_near_zone(zone, max_atr_multiple=1.0):
+        if zone is None or last_atr is None or last_atr == 0:
+            return False, None
+        dist = abs(last_close - zone["level"])
+        multiple = dist / last_atr
+        return multiple <= max_atr_multiple, multiple
+
     if bias == "LONG":
         prev_rsi = rsi_5[last_idx - 1]
         print(f"[DEBUG] 5M LONG prev_rsi={prev_rsi}, last_rsi={last_rsi}")
         if prev_rsi is not None and prev_rsi < 40 and last_rsi > 40:
-            # wybicie lokalnego high + powyżej EMA
             if last_close > recent_high and last_close > e20 and last_close > e50:
-                print("[DEBUG] 5M LONG trigger conditions met")
-                signal = {
-                    "side": "BUY",
-                    "timestamp": last_candle["ts"],
-                    "price": last_close,
-                    "atr": last_atr,
-                }
+                nearest_support = find_nearest_zone(support_zones or [], last_close, "below")
+                near, multiple = is_near_zone(nearest_support, max_atr_multiple=1.0)
+                print(f"[DEBUG] 5M LONG nearest_support={nearest_support}, near={near}, dist_atr={multiple}")
+                if nearest_support and near:
+                    print("[DEBUG] 5M LONG trigger conditions + S/R met")
+                    signal = {
+                        "side": "BUY",
+                        "timestamp": last_candle["ts"],
+                        "price": last_close,
+                        "atr": last_atr,
+                        "sr_level": nearest_support["level"],
+                        "sr_strength": nearest_support["strength"],
+                        "sr_distance_atr": multiple,
+                    }
+                else:
+                    print("[DEBUG] 5M LONG: dobre wybicie, ale daleko od 1H wsparcia -> brak sygnału")
             else:
                 print("[DEBUG] 5M LONG: RSI ok, ale brak wybicia high / powyżej EMA")
         else:
@@ -303,15 +446,23 @@ def check_5m_trigger(candles_5m, bias):
         prev_rsi = rsi_5[last_idx - 1]
         print(f"[DEBUG] 5M SHORT prev_rsi={prev_rsi}, last_rsi={last_rsi}")
         if prev_rsi is not None and prev_rsi > 60 and last_rsi < 60:
-            # wybicie lokalnego low + poniżej EMA
             if last_close < recent_low and last_close < e20 and last_close < e50:
-                print("[DEBUG] 5M SHORT trigger conditions met")
-                signal = {
-                    "side": "SELL",
-                    "timestamp": last_candle["ts"],
-                    "price": last_close,
-                    "atr": last_atr,
-                }
+                nearest_res = find_nearest_zone(resistance_zones or [], last_close, "above")
+                near, multiple = is_near_zone(nearest_res, max_atr_multiple=1.0)
+                print(f"[DEBUG] 5M SHORT nearest_res={nearest_res}, near={near}, dist_atr={multiple}")
+                if nearest_res and near:
+                    print("[DEBUG] 5M SHORT trigger conditions + S/R met")
+                    signal = {
+                        "side": "SELL",
+                        "timestamp": last_candle["ts"],
+                        "price": last_close,
+                        "atr": last_atr,
+                        "sr_level": nearest_res["level"],
+                        "sr_strength": nearest_res["strength"],
+                        "sr_distance_atr": multiple,
+                    }
+                else:
+                    print("[DEBUG] 5M SHORT: dobre wybicie, ale daleko od 1H oporu -> brak sygnału")
             else:
                 print("[DEBUG] 5M SHORT: RSI ok, ale brak wybicia low / poniżej EMA")
         else:
@@ -324,6 +475,9 @@ def check_5m_trigger(candles_5m, bias):
 def build_signal_with_risk(signal, bias):
     """
     Dodaje SL/TP i score.
+    Bonus do score za:
+      - mocniejszy poziom S/R (więcej swingów),
+      - wejście blisko poziomu (mniej niż 0.5 ATR).
     """
     atr_val = signal["atr"]
     price = signal["price"]
@@ -342,11 +496,19 @@ def build_signal_with_risk(signal, bias):
         sl = price + atr_val
         tp = price - atr_val * 2
 
-    base_score = 70
+    base_score = 60
     rr_bonus = 10 if rr >= 2.0 else 0
-    final_score = base_score + rr_bonus
 
-    print(f"[DEBUG] build_signal_with_risk: side={side}, price={price}, sl={sl}, tp={tp}, rr={rr}, score={final_score}")
+    sr_bonus = 0
+    if "sr_strength" in signal:
+        sr_bonus += min(signal["sr_strength"] * 2, 10)
+    if "sr_distance_atr" in signal and signal["sr_distance_atr"] is not None:
+        if signal["sr_distance_atr"] <= 0.5:
+            sr_bonus += 5
+
+    final_score = base_score + rr_bonus + sr_bonus
+
+    print(f"[DEBUG] build_signal_with_risk: side={side}, price={price}, sl={sl}, tp={tp}, rr={rr}, base={base_score}, sr_bonus={sr_bonus}, score={final_score}")
 
     signal_out = {
         "instrument": INSTRUMENT,
@@ -360,6 +522,15 @@ def build_signal_with_risk(signal, bias):
         "bias": bias,
         "timeframe_entry": TIMEFRAME_5M,
     }
+
+    # info o S/R jeśli jest
+    if "sr_level" in signal:
+        signal_out["sr_level"] = signal["sr_level"]
+    if "sr_strength" in signal:
+        signal_out["sr_strength"] = signal["sr_strength"]
+    if "sr_distance_atr" in signal:
+        signal_out["sr_distance_atr"] = signal["sr_distance_atr"]
+
     return signal_out
 
 
@@ -391,6 +562,13 @@ def persist_signal_to_dynamodb(signal_obj):
         "created_at": now_iso,
     }
 
+    if "sr_level" in signal_obj:
+        item["sr_level"] = _to_decimal(signal_obj["sr_level"])
+    if "sr_strength" in signal_obj:
+        item["sr_strength"] = decimal.Decimal(signal_obj["sr_strength"])
+    if "sr_distance_atr" in signal_obj and signal_obj["sr_distance_atr"] is not None:
+        item["sr_distance_atr"] = _to_decimal(signal_obj["sr_distance_atr"])
+
     print(f"[DEBUG] DynamoDB put_item to {SIGNALS_TABLE_NAME}: {item}")
     table.put_item(Item=item)
     print("[DEBUG] persist_signal_to_dynamodb: put_item done")
@@ -401,7 +579,6 @@ def handler(event, context):
     print(f"[DEBUG] Lambda started, event={event}")
     print(f"[DEBUG] Using tables: OHLC={OHLC_TABLE_NAME}, SIGNALS={SIGNALS_TABLE_NAME}, instrument={INSTRUMENT}")
 
-    # 1. pobierz świece
     daily_pk = f"{INSTRUMENT}#{TIMEFRAME_1D}"
     hourly_pk = f"{INSTRUMENT}#{TIMEFRAME_1H}"
     m5_pk = f"{INSTRUMENT}#{TIMEFRAME_5M}"
@@ -410,7 +587,7 @@ def handler(event, context):
     hourly_candles = fetch_candles(hourly_pk, limit=300)
     m5_candles = fetch_candles(m5_pk, limit=300)
 
-    # 2. bias z 1D
+    # 1D bias (na zamkniętej świecy)
     bias = determine_daily_bias(daily_candles)
     print(f"[DEBUG] Daily bias={bias}")
     if bias == "NONE":
@@ -423,7 +600,10 @@ def handler(event, context):
             }),
         }
 
-    # 3. setup na 1H
+    # S/R z 1H
+    support_zones, resistance_zones = calc_sr_zones(hourly_candles)
+
+    # 1H filtr (na zamkniętej świecy)
     setup_ok = check_1h_setup(hourly_candles, bias)
     print(f"[DEBUG] 1H setup_ok={setup_ok}")
     if not setup_ok:
@@ -436,8 +616,8 @@ def handler(event, context):
             }),
         }
 
-    # 4. trigger na 5M
-    raw_signal = check_5m_trigger(m5_candles, bias)
+    # 5M trigger + S/R
+    raw_signal = check_5m_trigger(m5_candles, bias, support_zones, resistance_zones)
     print(f"[DEBUG] raw_signal={raw_signal}")
     if raw_signal is None:
         print("[DEBUG] Exiting: No 5M trigger")
@@ -449,7 +629,6 @@ def handler(event, context):
             }),
         }
 
-    # 5. RR, SL/TP, score
     full_signal = build_signal_with_risk(raw_signal, bias)
     print(f"[DEBUG] full_signal={full_signal}")
     if full_signal is None or full_signal["score"] < 70:
@@ -462,10 +641,8 @@ def handler(event, context):
             }),
         }
 
-    # 6. Zapis sygnału do tabeli brent_signals
     persist_signal_to_dynamodb(full_signal)
 
-    # 7. Zwróć sygnał w odpowiedzi
     print("[DEBUG] Signal generated and stored successfully")
     return {
         "statusCode": 200,
