@@ -1,9 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react'
+import  { useEffect, useRef, useState } from 'react'
 import {
   createChart,
   CrosshairMode,
   CandlestickSeries,
   LineSeries,
+  ColorType,
+  type ISeriesApi,
+  type Time
 } from 'lightweight-charts'
 
 import { transformApiData } from './transform'
@@ -51,13 +54,8 @@ export default function App() {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null)
 
-  const candleSeriesRef = useRef<
-    ReturnType<ReturnType<typeof createChart>['addCandlestickSeries']> | null
-  >(null)
-
-  const lineSeriesRef = useRef<
-    ReturnType<ReturnType<typeof createChart>['addLineSeries']> | null
-  >(null)
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const lineSeriesRef   = useRef<ISeriesApi<'Line'> | null>(null)
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -66,7 +64,7 @@ export default function App() {
       width: wrapRef.current.clientWidth,
       height: 440,
       crosshair: { mode: CrosshairMode.Normal },
-      layout: { background: { type: 'solid', color: '#fff' }, textColor: '#0f172a' },
+      layout: { background: { type: ColorType.Solid, color: '#fff' }, textColor: '#0f172a' },
       grid: { vertLines: { color: '#e2e8f0' }, horzLines: { color: '#e2e8f0' } },
       rightPriceScale: { borderVisible: false },
       timeScale: {
@@ -116,7 +114,7 @@ export default function App() {
     if (!rows.length || !candleSeriesRef.current || !lineSeriesRef.current) return
 
     const candleData = rows.map(r => ({
-      time: Math.floor(r.t.getTime() / 1000),
+      time: Math.floor(r.t.getTime() / 1000) as Time,
       open: r.o,
       high: r.h,
       low: r.l,
@@ -124,12 +122,12 @@ export default function App() {
     }))
 
     const lineData = rows.map(r => ({
-      time: Math.floor(r.t.getTime() / 1000),
+      time: Math.floor(r.t.getTime() / 1000) as Time,
       value: r.c, // linia po cenie zamknięcia
     }))
 
-    candleSeriesRef.current.setData(candleData)
-    lineSeriesRef.current.setData(lineData)
+  candleSeriesRef.current?.setData(candleData)
+  lineSeriesRef.current?.setData(lineData)
   }, [rows, tf])
 
   return (
