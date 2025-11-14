@@ -153,6 +153,7 @@ export default function App() {
             <option value="5m">5m</option>
             <option value="1h">1h</option>
             <option value="4h">4h</option>
+            <option value="1d">1d</option>
           </select>
         </div>
         <div>
