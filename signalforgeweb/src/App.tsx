@@ -8,6 +8,8 @@ import {
   type ISeriesApi,
   type Time
 } from 'lightweight-charts'
+import { DebugTable } from './DebugTable'
+
 
 import { transformApiData } from './transform'
 import type { Candle } from './transform'
@@ -191,6 +193,10 @@ export default function App() {
 
       <div className="card" style={{ padding: 12 }}>
         <div ref={wrapRef} style={{ width: '100%', height: 440 }} />
+      </div>
+
+      <div className="card" style={{ padding: 12, marginTop: 12 }}>
+        <DebugTable instrument="BZ=F" limit={30} />
       </div>
 
       <p>

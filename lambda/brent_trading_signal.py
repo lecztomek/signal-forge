@@ -10,6 +10,7 @@ dynamodb = boto3.resource("dynamodb")
 # --- konfiguracja z env ---
 OHLC_TABLE_NAME = os.getenv("OHLC_TABLE_NAME", "brent_ohlc")
 SIGNALS_TABLE_NAME = os.getenv("SIGNALS_TABLE_NAME", "brent_signals")
+DEBUG_TABLE_NAME = os.getenv("DEBUG_TABLE_NAME", "brent_signals_debug")
 INSTRUMENT = os.getenv("INSTRUMENT", "BZ=F")
 
 TIMEFRAME_1D = "1d"
@@ -25,10 +26,38 @@ def _to_float(x):
 
 
 def _to_decimal(x):
-    # bezpieczna konwersja float -> Decimal
+    # UWAGA: bool jest podklasą int, więc musimy go wykluczyć
+    if isinstance(x, bool):
+        return x
     if isinstance(x, Decimal):
         return x
     return Decimal(str(x))
+
+
+def _to_decimal_deep(obj):
+    """
+    Rekurencyjna konwersja liczb (float/int/Decimal) w całej strukturze na Decimal,
+    z pominięciem booli.
+    """
+    # bool zostawiamy tak jak jest
+    if isinstance(obj, bool):
+        return obj
+
+    # liczby -> Decimal
+    if isinstance(obj, (float, int, Decimal, decimal.Decimal)):
+        return _to_decimal(obj)
+
+    # listy -> rekurencyjnie po elementach
+    if isinstance(obj, list):
+        return [_to_decimal_deep(v) for v in obj]
+
+    # słowniki -> rekurencyjnie po wartościach
+    if isinstance(obj, dict):
+        return {k: _to_decimal_deep(v) for k, v in obj.items()}
+
+    # inne typy (str, None, itp.) zostawiamy
+    return obj
+
 
 
 # --------- Pobieranie danych z DynamoDB ---------
@@ -145,15 +174,17 @@ def atr(highs, lows, closes, period=14):
     return atr_vals
 
 
-# --------- Logika trendu na 1D (łagodniejsza, na zamkniętej świecy) ---------
+# --------- Logika trendu na 1D (na zamkniętej świecy) ---------
 def determine_daily_bias(daily_candles):
     """
-    Zwraca 'LONG', 'SHORT' albo 'NONE'.
+    Zwraca (bias, debug_dict).
     Bias liczony na PRZEDOSTATNIEJ świecy (ostatnia może być w trakcie).
       - LONG: EMA20 > EMA50 i RSI > 50
       - SHORT: EMA20 < EMA50 i RSI < 50
     """
     print(f"[DEBUG] determine_daily_bias: candles_1d_count={len(daily_candles)}")
+    debug = {"candles_count": len(daily_candles)}
+
     closes = [c["close"] for c in daily_candles]
     ema20 = ema(closes, 20)
     ema50 = ema(closes, 50)
@@ -161,40 +192,51 @@ def determine_daily_bias(daily_candles):
 
     if len(closes) < 2:
         print("[DEBUG] determine_daily_bias: not enough candles -> BIAS=NONE")
-        return "NONE"
+        debug["reason"] = "not_enough_candles"
+        return "NONE", debug
 
     # używamy przedostatniej świecy – zamkniętej
     idx = len(closes) - 2
-
     c = closes[idx]
     e20 = ema20[idx]
     e50 = ema50[idx]
     r = rsi14[idx]
 
+    debug.update({
+        "idx": idx,
+        "ts": daily_candles[idx]["ts"],
+        "close": c,
+        "ema20": e20,
+        "ema50": e50,
+        "rsi14": r,
+    })
+
     print(f"[DEBUG] 1D (closed) idx={idx}, close={c}, ema20={e20}, ema50={e50}, rsi14={r}")
 
     if e20 is None or e50 is None or r is None:
         print("[DEBUG] determine_daily_bias: some indicator is None -> BIAS=NONE")
-        return "NONE"
+        debug["reason"] = "indicator_none"
+        return "NONE", debug
 
     if e20 > e50 and r > 50:
         print("[DEBUG] determine_daily_bias: conditions for LONG met (ema20>ema50, rsi>50)")
-        return "LONG"
+        debug["reason"] = "long_conditions"
+        return "LONG", debug
     elif e20 < e50 and r < 50:
         print("[DEBUG] determine_daily_bias: conditions for SHORT met (ema20<ema50, rsi<50)")
-        return "SHORT"
+        debug["reason"] = "short_conditions"
+        return "SHORT", debug
     else:
         print("[DEBUG] determine_daily_bias: no clear ema20/ema50 + rsi trend -> BIAS=NONE")
-        return "NONE"
+        debug["reason"] = "no_clear_trend"
+        return "NONE", debug
 
 
 # --------- Wsparcie / opór z 1H (swings + clustering) ---------
 def detect_swings(candles, lookback=80, swing_window=2):
     """
-    Detekcja swing high / swing low na 1H:
-    - swing high: high większy niż w oknie +/- swing_window
-    - swing low: low mniejszy niż w oknie +/- swing_window
-    Zwraca listy poziomów swing_highs, swing_lows.
+    Detekcja swing high / swing low na 1H.
+    Zwraca listy swing_highs, swing_lows (poziomy).
     """
     if len(candles) == 0:
         return [], []
@@ -225,9 +267,7 @@ def detect_swings(candles, lookback=80, swing_window=2):
 
 def cluster_levels(levels, tolerance_pct=0.002):
     """
-    Grupuje poziomy (np. swing highs/lows) w strefy:
-      - jeśli poziomy są blisko siebie (w %), łączymy je w jedną strefę
-      - zwracamy listę: [{"level": poziom, "strength": ile swingów}, ...]
+    Grupuje poziomy w strefy (level + strength).
     """
     if not levels:
         return []
@@ -246,7 +286,6 @@ def cluster_levels(levels, tolerance_pct=0.002):
             zones.append({"level": level, "strength": strength})
             current_cluster = [p]
 
-    # ostatni klaster
     if current_cluster:
         level = sum(current_cluster) / len(current_cluster)
         strength = len(current_cluster)
@@ -260,11 +299,8 @@ def cluster_levels(levels, tolerance_pct=0.002):
 
 def calc_sr_zones(hourly_candles, lookback=80, swing_window=2, tolerance_pct=0.002):
     """
-    Na 1H:
-      - wykrywa swing highs/lows,
-      - grupuje je w strefy S/R.
-    Zwraca:
-      support_zones (z swing_low), resistance_zones (z swing_high).
+    Wyznacza strefy wsparcia/oporu na 1H.
+    Zwraca (support_zones, resistance_zones).
     """
     swing_highs, swing_lows = detect_swings(hourly_candles, lookback, swing_window)
     resistance_zones = cluster_levels(swing_highs, tolerance_pct)
@@ -275,11 +311,7 @@ def calc_sr_zones(hourly_candles, lookback=80, swing_window=2, tolerance_pct=0.0
 
 def find_nearest_zone(zones, price, direction="any"):
     """
-    Znajduje najbliższą strefę względem ceny:
-      - direction='below'  -> preferuj poziomy <= price
-      - direction='above'  -> preferuj poziomy >= price
-      - direction='any'    -> dowolny najbliższy
-    Zwraca dict {"level": ..., "strength": ...} lub None.
+    Najbliższa strefa względem ceny.
     """
     if not zones:
         return None
@@ -292,54 +324,68 @@ def find_nearest_zone(zones, price, direction="any"):
         candidates = zones[:]
 
     if not candidates:
-        candidates = zones[:]  # fallback: cokolwiek najbliżej
+        candidates = zones[:]  # fallback
 
     best = min(candidates, key=lambda z: abs(z["level"] - price))
     print(f"[DEBUG] find_nearest_zone: price={price}, dir={direction}, best={best}")
     return best
 
 
-# --------- Logika 1H (miękka, na zamkniętej świecy) ---------
+# --------- Logika 1H (miękka, zamknięta świeca) ---------
 def check_1h_setup(hourly_candles, bias):
     """
-    Sprawdza, czy 1H wspiera bias z 1D.
-    Używamy EMA o długości dostosowanej do ilości świec (min 10, max 50).
-    Warunki miękkie:
-      LONG  -> wystarczy JEDNO z: close>EMA LUB RSI>50 LUB higher low
-      SHORT -> wystarczy JEDNO z: close<EMA LUB RSI<50 LUB lower high
-    Używamy PRZEDOSTATNIEJ świecy 1H (ostatnia może być w trakcie).
+    Zwraca (setup_ok, debug_dict).
     """
     print(f"[DEBUG] check_1h_setup: candles_1h_count={len(hourly_candles)}, bias={bias}")
+    debug = {"candles_count": len(hourly_candles), "bias": bias}
+
     if len(hourly_candles) < 10:
         print("[DEBUG] check_1h_setup: not enough 1H candles (<10)")
-        return False
+        debug["reason"] = "not_enough_candles"
+        return False, debug
 
     closes = [c["close"] for c in hourly_candles]
 
     ema_period = min(20, max(10, len(closes) - 2))
     print(f"[DEBUG] check_1h_setup: using ema_period={ema_period}")
+    debug["ema_period"] = ema_period
 
     ema_h = ema(closes, ema_period)
     rsi_h = rsi(closes, 14)
 
     # używamy przedostatniej świecy 1H
     last_idx = len(closes) - 2
-
     c = closes[last_idx]
     e = ema_h[last_idx]
     r = rsi_h[last_idx]
+
+    debug.update({
+        "idx": last_idx,
+        "ts": hourly_candles[last_idx]["ts"],
+        "close": c,
+        "ema": e,
+        "rsi14": r,
+    })
 
     print(f"[DEBUG] 1H (closed) idx={last_idx}, close={c}, ema{ema_period}={e}, rsi14={r}")
 
     if e is None or r is None:
         print("[DEBUG] check_1h_setup: ema or rsi is None")
-        return False
+        debug["reason"] = "indicator_none"
+        return False, debug
 
     last_low = min(hourly_candles[last_idx - 2:last_idx + 1], key=lambda x: x["low"])["low"]
     prev_low = min(hourly_candles[last_idx - 3:last_idx],   key=lambda x: x["low"])["low"]
 
     last_high = max(hourly_candles[last_idx - 2:last_idx + 1], key=lambda x: x["high"])["high"]
     prev_high = max(hourly_candles[last_idx - 3:last_idx],     key=lambda x: x["high"])["high"]
+
+    debug.update({
+        "last_low": last_low,
+        "prev_low": prev_low,
+        "last_high": last_high,
+        "prev_high": prev_high,
+    })
 
     print(f"[DEBUG] 1H last_low={last_low}, prev_low={prev_low}, last_high={last_high}, prev_high={prev_high}")
 
@@ -348,34 +394,47 @@ def check_1h_setup(hourly_candles, bias):
         cond_rsi = r > 50
         cond_structure = last_low >= prev_low
         ok = cond_price or cond_rsi or cond_structure
+        debug.update({
+            "cond_price": cond_price,
+            "cond_rsi": cond_rsi,
+            "cond_structure": cond_structure,
+        })
         print(f"[DEBUG] check_1h_setup LONG -> {ok} (price>{e}? {cond_price}, rsi>50? {cond_rsi}, HL? {cond_structure})")
-        return ok
+        debug["reason"] = "long_conditions" if ok else "long_not_met"
+        return ok, debug
 
     elif bias == "SHORT":
         cond_price = c < e
         cond_rsi = r < 50
         cond_structure = last_high <= prev_high
         ok = cond_price or cond_rsi or cond_structure
+        debug.update({
+            "cond_price": cond_price,
+            "cond_rsi": cond_rsi,
+            "cond_structure": cond_structure,
+        })
         print(f"[DEBUG] check_1h_setup SHORT -> {ok} (price<{e}? {cond_price}, rsi<50? {cond_rsi}, LH? {cond_structure})")
-        return ok
+        debug["reason"] = "short_conditions" if ok else "short_not_met"
+        return ok, debug
 
     else:
         print("[DEBUG] check_1h_setup: bias NONE -> False")
-        return False
+        debug["reason"] = "bias_none"
+        return False, debug
 
 
 # --------- Logika wejścia na 5M (z S/R) ---------
 def check_5m_trigger(candles_5m, bias, support_zones=None, resistance_zones=None):
     """
-    Uproszczony trigger:
-    - dla LONG: RSI wychodzi z wyprzedania, wybicie lokalnego szczytu, BLISKO wsparcia 1H
-    - dla SHORT: RSI wychodzi z wykupienia, wybicie lokalnego dołka, BLISKO oporu 1H
-    (tu zakładamy, że ostatnia świeca 5m jest zamknięta).
+    Zwraca (signal_or_None, debug_dict).
     """
     print(f"[DEBUG] check_5m_trigger: candles_5m_count={len(candles_5m)}, bias={bias}")
+    debug = {"candles_count": len(candles_5m), "bias": bias}
+
     if len(candles_5m) < 30:
         print("[DEBUG] check_5m_trigger: not enough 5M candles")
-        return None
+        debug["reason"] = "not_enough_candles"
+        return None, debug
 
     closes = [c["close"] for c in candles_5m]
     highs = [c["high"] for c in candles_5m]
@@ -394,16 +453,32 @@ def check_5m_trigger(candles_5m, bias, support_zones=None, resistance_zones=None
     e20 = ema20_5[last_idx]
     e50 = ema50_5[last_idx]
 
+    debug.update({
+        "idx": last_idx,
+        "ts": last_candle["ts"],
+        "last_close": last_close,
+        "last_rsi": last_rsi,
+        "atr": last_atr,
+        "ema20": e20,
+        "ema50": e50,
+    })
+
     print(f"[DEBUG] 5M last candle={last_candle}")
     print(f"[DEBUG] 5M last_close={last_close}, rsi={last_rsi}, atr={last_atr}, ema20={e20}, ema50={e50}")
 
     if last_rsi is None or last_atr is None or e20 is None or e50 is None:
         print("[DEBUG] check_5m_trigger: some indicator is None -> no signal")
-        return None
+        debug["reason"] = "indicator_none"
+        return None, debug
 
     window = 5
     recent_high = max(highs[last_idx - window:last_idx])
     recent_low = min(lows[last_idx - window:last_idx])
+
+    debug.update({
+        "recent_high": recent_high,
+        "recent_low": recent_low,
+    })
 
     print(f"[DEBUG] 5M recent_high={recent_high}, recent_low={recent_low}")
 
@@ -418,11 +493,15 @@ def check_5m_trigger(candles_5m, bias, support_zones=None, resistance_zones=None
 
     if bias == "LONG":
         prev_rsi = rsi_5[last_idx - 1]
+        debug["prev_rsi"] = prev_rsi
         print(f"[DEBUG] 5M LONG prev_rsi={prev_rsi}, last_rsi={last_rsi}")
         if prev_rsi is not None and prev_rsi < 40 and last_rsi > 40:
             if last_close > recent_high and last_close > e20 and last_close > e50:
                 nearest_support = find_nearest_zone(support_zones or [], last_close, "below")
                 near, multiple = is_near_zone(nearest_support, max_atr_multiple=1.0)
+                debug["nearest_support"] = nearest_support
+                debug["nearest_support_near"] = near
+                debug["nearest_support_dist_atr"] = multiple
                 print(f"[DEBUG] 5M LONG nearest_support={nearest_support}, near={near}, dist_atr={multiple}")
                 if nearest_support and near:
                     print("[DEBUG] 5M LONG trigger conditions + S/R met")
@@ -435,20 +514,28 @@ def check_5m_trigger(candles_5m, bias, support_zones=None, resistance_zones=None
                         "sr_strength": nearest_support["strength"],
                         "sr_distance_atr": multiple,
                     }
+                    debug["reason"] = "trigger_long_sr_ok"
                 else:
                     print("[DEBUG] 5M LONG: dobre wybicie, ale daleko od 1H wsparcia -> brak sygnału")
+                    debug["reason"] = "long_far_from_support"
             else:
                 print("[DEBUG] 5M LONG: RSI ok, ale brak wybicia high / powyżej EMA")
+                debug["reason"] = "long_no_breakout"
         else:
             print("[DEBUG] 5M LONG: RSI pattern not met")
+            debug["reason"] = "long_rsi_pattern_not_met"
 
     elif bias == "SHORT":
         prev_rsi = rsi_5[last_idx - 1]
+        debug["prev_rsi"] = prev_rsi
         print(f"[DEBUG] 5M SHORT prev_rsi={prev_rsi}, last_rsi={last_rsi}")
         if prev_rsi is not None and prev_rsi > 60 and last_rsi < 60:
             if last_close < recent_low and last_close < e20 and last_close < e50:
                 nearest_res = find_nearest_zone(resistance_zones or [], last_close, "above")
                 near, multiple = is_near_zone(nearest_res, max_atr_multiple=1.0)
+                debug["nearest_resistance"] = nearest_res
+                debug["nearest_resistance_near"] = near
+                debug["nearest_resistance_dist_atr"] = multiple
                 print(f"[DEBUG] 5M SHORT nearest_res={nearest_res}, near={near}, dist_atr={multiple}")
                 if nearest_res and near:
                     print("[DEBUG] 5M SHORT trigger conditions + S/R met")
@@ -461,23 +548,24 @@ def check_5m_trigger(candles_5m, bias, support_zones=None, resistance_zones=None
                         "sr_strength": nearest_res["strength"],
                         "sr_distance_atr": multiple,
                     }
+                    debug["reason"] = "trigger_short_sr_ok"
                 else:
                     print("[DEBUG] 5M SHORT: dobre wybicie, ale daleko od 1H oporu -> brak sygnału")
+                    debug["reason"] = "short_far_from_resistance"
             else:
                 print("[DEBUG] 5M SHORT: RSI ok, ale brak wybicia low / poniżej EMA")
+                debug["reason"] = "short_no_breakout"
         else:
             print("[DEBUG] 5M SHORT: RSI pattern not met")
+            debug["reason"] = "short_rsi_pattern_not_met"
 
-    return signal
+    return signal, debug
 
 
 # --------- Scoring + TP/SL ---------
 def build_signal_with_risk(signal, bias):
     """
     Dodaje SL/TP i score.
-    Bonus do score za:
-      - mocniejszy poziom S/R (więcej swingów),
-      - wejście blisko poziomu (mniej niż 0.5 ATR).
     """
     atr_val = signal["atr"]
     price = signal["price"]
@@ -523,7 +611,6 @@ def build_signal_with_risk(signal, bias):
         "timeframe_entry": TIMEFRAME_5M,
     }
 
-    # info o S/R jeśli jest
     if "sr_level" in signal:
         signal_out["sr_level"] = signal["sr_level"]
     if "sr_strength" in signal:
@@ -534,11 +621,8 @@ def build_signal_with_risk(signal, bias):
     return signal_out
 
 
-# --------- Zapis sygnału do nowej tabeli ---------
+# --------- Zapis sygnału do tabeli sygnałów ---------
 def persist_signal_to_dynamodb(signal_obj):
-    """
-    Zapisuje sygnał do tabeli `brent_signals`.
-    """
     print(f"[DEBUG] persist_signal_to_dynamodb: saving signal={signal_obj}")
     table = dynamodb.Table(SIGNALS_TABLE_NAME)
 
@@ -574,10 +658,47 @@ def persist_signal_to_dynamodb(signal_obj):
     print("[DEBUG] persist_signal_to_dynamodb: put_item done")
 
 
+# --------- Zapis debug info do osobnej tabeli ---------
+def persist_debug_to_dynamodb(debug_obj):
+    """
+    Zapisuje pełny snapshot obliczeń do tabeli debugowej.
+    """
+    print("[DEBUG] persist_debug_to_dynamodb: saving debug snapshot")
+    table = dynamodb.Table(DEBUG_TABLE_NAME)
+
+    instrument = debug_obj.get("instrument", INSTRUMENT)
+    pk_value = f"{instrument}#debug"
+
+    # ts – preferuj timestamp świecy 5m, jeśli jest
+    ts = None
+    m5 = debug_obj.get("m5") or {}
+    ts = m5.get("ts")
+    if not ts:
+        ts = debug_obj.get("run_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    item = {
+        "pk": pk_value,
+        "ts": ts,
+        "debug": _to_decimal_deep(debug_obj),
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+    print(f"[DEBUG] DynamoDB put_item to {DEBUG_TABLE_NAME}: {item}")
+    table.put_item(Item=item)
+    print("[DEBUG] persist_debug_to_dynamodb: put_item done")
+
+
 # --------- Główny handler Lambdy ---------
 def handler(event, context):
+    run_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     print(f"[DEBUG] Lambda started, event={event}")
-    print(f"[DEBUG] Using tables: OHLC={OHLC_TABLE_NAME}, SIGNALS={SIGNALS_TABLE_NAME}, instrument={INSTRUMENT}")
+    print(f"[DEBUG] Using tables: OHLC={OHLC_TABLE_NAME}, SIGNALS={SIGNALS_TABLE_NAME}, DEBUG={DEBUG_TABLE_NAME}, instrument={INSTRUMENT}")
+
+    debug_info = {
+        "instrument": INSTRUMENT,
+        "run_at": run_at,
+        "event": event,
+    }
 
     daily_pk = f"{INSTRUMENT}#{TIMEFRAME_1D}"
     hourly_pk = f"{INSTRUMENT}#{TIMEFRAME_1H}"
@@ -588,60 +709,91 @@ def handler(event, context):
     m5_candles = fetch_candles(m5_pk, limit=300)
 
     # 1D bias (na zamkniętej świecy)
-    bias = determine_daily_bias(daily_candles)
+    bias, daily_debug = determine_daily_bias(daily_candles)
+    debug_info["daily"] = daily_debug
+    debug_info["daily"]["bias"] = bias
+
     print(f"[DEBUG] Daily bias={bias}")
     if bias == "NONE":
+        debug_info["final"] = {
+            "has_signal": False,
+            "reason": "No daily trend (BIAS = NONE).",
+        }
+        persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: BIAS = NONE -> no signal, nothing saved")
         return {
             "statusCode": 200,
-            "body": json.dumps({
-                "signal": None,
-                "reason": "No daily trend (BIAS = NONE).",
-            }),
+            "body": json.dumps(debug_info["final"]),
         }
 
     # S/R z 1H
     support_zones, resistance_zones = calc_sr_zones(hourly_candles)
+    debug_info["sr"] = {
+        "support_zones": support_zones,
+        "resistance_zones": resistance_zones,
+    }
 
     # 1H filtr (na zamkniętej świecy)
-    setup_ok = check_1h_setup(hourly_candles, bias)
+    setup_ok, h1_debug = check_1h_setup(hourly_candles, bias)
+    debug_info["h1"] = h1_debug
+    debug_info["h1"]["setup_ok"] = setup_ok
+
     print(f"[DEBUG] 1H setup_ok={setup_ok}")
     if not setup_ok:
+        debug_info["final"] = {
+            "has_signal": False,
+            "reason": "1H conditions not met.",
+        }
+        persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: 1H conditions not met")
         return {
             "statusCode": 200,
-            "body": json.dumps({
-                "signal": None,
-                "reason": "1H conditions not met.",
-            }),
+            "body": json.dumps(debug_info["final"]),
         }
 
     # 5M trigger + S/R
-    raw_signal = check_5m_trigger(m5_candles, bias, support_zones, resistance_zones)
+    raw_signal, m5_debug = check_5m_trigger(m5_candles, bias, support_zones, resistance_zones)
+    debug_info["m5"] = m5_debug
+    debug_info["m5"]["has_raw_signal"] = raw_signal is not None
+
     print(f"[DEBUG] raw_signal={raw_signal}")
     if raw_signal is None:
+        debug_info["final"] = {
+            "has_signal": False,
+            "reason": "No 5M trigger.",
+        }
+        persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: No 5M trigger")
         return {
             "statusCode": 200,
-            "body": json.dumps({
-                "signal": None,
-                "reason": "No 5M trigger.",
-            }),
+            "body": json.dumps(debug_info["final"]),
         }
 
+    # RR, SL/TP, score
     full_signal = build_signal_with_risk(raw_signal, bias)
     print(f"[DEBUG] full_signal={full_signal}")
+    debug_info["signal"] = full_signal
+
     if full_signal is None or full_signal["score"] < 70:
+        debug_info["final"] = {
+            "has_signal": False,
+            "reason": "Signal score too low.",
+        }
+        persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: signal is None or score too low")
         return {
             "statusCode": 200,
-            "body": json.dumps({
-                "signal": None,
-                "reason": "Signal score too low.",
-            }),
+            "body": json.dumps(debug_info["final"]),
         }
 
+    # Zapis sygnału
     persist_signal_to_dynamodb(full_signal)
+
+    debug_info["final"] = {
+        "has_signal": True,
+        "reason": "Signal generated and stored.",
+    }
+    persist_debug_to_dynamodb(debug_info)
 
     print("[DEBUG] Signal generated and stored successfully")
     return {
