@@ -11,7 +11,7 @@ import pandas as pd
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-# ===== ENV =====
+# ===== ENV (domyślna konfiguracja) =====
 TABLE_NAME        = os.environ.get("DDB_TABLE_OHLC", "brent_ohlc")   # OHLC (5m,1h,4h)
 TICKS_TABLE_NAME  = os.environ.get("DDB_TABLE_TICKS", "brent_ticks") # ticki
 
@@ -260,6 +260,61 @@ def resample_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
 
 # ===== Handler =====
 def handler(event, context):
+    """
+    Event może nadpisać konfigurację, np.:
+
+    Prosto:
+    {
+      "SYMBOL": "CL=F",
+      "FMP_SYMBOL": "CLUSD",
+      "DDB_TABLE_OHLC": "cl_ohlc",
+      "DDB_TABLE_TICKS": "cl_ticks",
+      "FMP_API_KEY": "xxx"
+    }
+
+    albo z sekcją config:
+    {
+      "config": {
+        "SYMBOL": "CL=F",
+        "FMP_SYMBOL": "CLUSD",
+        "FMP_API_KEY": "xxx"
+      }
+    }
+    """
+    global TABLE_NAME, TICKS_TABLE_NAME, SYMBOL, FMP_SYMBOL, FMP_API_KEY, TABLE, TICKS_TABLE, dynamodb
+
+    # Event może być None/albo nie-dict (CloudWatch test, itp.)
+    if not isinstance(event, dict):
+        event = {}
+
+    # Pozwalamy na opakowanie w "config"
+    cfg = event.get("config", event) or {}
+
+    # Nadpisanie nazw tabel (jeśli przyszły)
+    TABLE_NAME       = cfg.get("DDB_TABLE_OHLC", TABLE_NAME)
+    TICKS_TABLE_NAME = cfg.get("DDB_TABLE_TICKS", TICKS_TABLE_NAME)
+
+    # Nadpisanie symboli (duże i małe nazwy)
+    SYMBOL     = cfg.get("SYMBOL", cfg.get("symbol", SYMBOL))
+    FMP_SYMBOL = cfg.get("FMP_SYMBOL", cfg.get("fmp_symbol", FMP_SYMBOL))
+
+    # Nadpisanie klucza API (jeśli przyjdzie w evencie)
+    FMP_API_KEY = cfg.get("FMP_API_KEY", FMP_API_KEY)
+
+    # Przebindowanie tabel pod aktualne nazwy
+    TABLE       = dynamodb.Table(TABLE_NAME)
+    TICKS_TABLE = dynamodb.Table(TICKS_TABLE_NAME)
+
+    # Uwaga: NIE logujemy API key'a
+    log.info({
+        "step": "effective_config",
+        "TABLE_NAME": TABLE_NAME,
+        "TICKS_TABLE_NAME": TICKS_TABLE_NAME,
+        "SYMBOL": SYMBOL,
+        "FMP_SYMBOL": FMP_SYMBOL,
+        # "FMP_API_KEY": "hidden"  # gdybyś bardzo chciał zaznaczyć
+    })
+
     # 1) Pobierz tick z FMP i zapisz do brent_ticks
     df_tick_last = fmp_fetch_last_quote_tick(FMP_SYMBOL)
     log.info({
