@@ -12,7 +12,7 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 # ===== ENV (domyślna konfiguracja) =====
-TABLE_NAME        = os.environ.get("DDB_TABLE_OHLC", "brent_ohlc")   # OHLC (5m,1h,4h)
+TABLE_NAME        = os.environ.get("DDB_TABLE_OHLC", "brent_ohlc")   # OHLC (5m,1h,4h,1d)
 TICKS_TABLE_NAME  = os.environ.get("DDB_TABLE_TICKS", "brent_ticks") # ticki
 
 SYMBOL      = os.environ.get("SYMBOL", "BZ=F")
@@ -41,7 +41,7 @@ def to_decimal(x, default: str = "0") -> Decimal:
 # ===== OHLC helpers =====
 def last_ts_iso(symbol: str, tf: str) -> str | None:
     """
-    Ostatni timestamp (ISO) dla danej ramy czasowej (5m,1h,4h).
+    Ostatni timestamp (ISO) dla danej ramy czasowej (5m,1h,4h,1d).
     """
     pk = f"{symbol}#{tf}"
     resp = TABLE.query(
@@ -83,7 +83,7 @@ def upsert_batch(symbol: str, tf: str, df: pd.DataFrame) -> int:
 
 def fetch_all_ohlc(symbol: str, tf: str) -> pd.DataFrame:
     """
-    Pobiera wszystkie świece dla danego tf (5m,1h,4h) z tabeli OHLC.
+    Pobiera wszystkie świece dla danego tf (5m,1h,4h,1d) z tabeli OHLC.
     Uwaga: dla dużej historii trzeba będzie dodać paginację (LastEvaluatedKey),
     tutaj dla prostoty bierzemy tylko pierwszą stronę.
     """
@@ -245,7 +245,7 @@ def ticks_to_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
 
 def resample_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     """
-    OHLC -> OHLC (np. 5m->1h, 1h->4h).
+    OHLC -> OHLC (np. 5m->1h, 1h->4h, 1h->1d).
     """
     if df is None or df.empty:
         return pd.DataFrame(columns=["timestamp","open","high","low","close","volume"])
@@ -332,6 +332,7 @@ def handler(event, context):
                 "inserted_5m": 0,
                 "inserted_1h": 0,
                 "inserted_4h": 0,
+                "inserted_1d": 0,
                 "note": "empty_fmp_quote"
             })
         }
@@ -388,11 +389,25 @@ def handler(event, context):
         "inserted_4h": int(n4),
     })
 
+    # 5) 1h -> 1d
+    last1d = last_ts_iso(SYMBOL, "1d")
+    df1d_full = resample_ohlc(df1h_all, "1D")
+    df1d_new  = filter_new(df1d_full, last1d)
+    n1d = upsert_batch(SYMBOL, "1d", df1d_new)
+    log.info({
+        "step": "build_1d",
+        "last1d_in_ddb": last1d,
+        "bars_1d_total": int(len(df1d_full)),
+        "bars_1d_new": int(len(df1d_new)),
+        "inserted_1d": int(n1d),
+    })
+
     result = {
         "inserted_tick": int(n_tick),
         "inserted_5m": int(n5),
         "inserted_1h": int(n1),
         "inserted_4h": int(n4),
+        "inserted_1d": int(n1d),
     }
     log.info({"result": result})
     return {
