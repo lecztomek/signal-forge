@@ -59,7 +59,6 @@ def _to_decimal_deep(obj):
     return obj
 
 
-
 # --------- Pobieranie danych z DynamoDB ---------
 def fetch_candles(pk_value: str, limit: int = 300):
     """
@@ -718,6 +717,10 @@ def handler(event, context):
         debug_info["final"] = {
             "has_signal": False,
             "reason": "No daily trend (BIAS = NONE).",
+            "daily_rsi": daily_debug.get("rsi14"),
+            "daily_close": daily_debug.get("close"),
+            "daily_ema20": daily_debug.get("ema20"),
+            "daily_ema50": daily_debug.get("ema50"),
         }
         persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: BIAS = NONE -> no signal, nothing saved")
@@ -742,7 +745,14 @@ def handler(event, context):
     if not setup_ok:
         debug_info["final"] = {
             "has_signal": False,
-            "reason": "1H conditions not met.",
+            "reason": f"1H conditions not met: {h1_debug.get('reason', 'unknown')}",
+            "h1_rsi": h1_debug.get("rsi14"),
+            "h1_close": h1_debug.get("close"),
+            "h1_ema": h1_debug.get("ema"),
+            "h1_last_low": h1_debug.get("last_low"),
+            "h1_prev_low": h1_debug.get("prev_low"),
+            "h1_last_high": h1_debug.get("last_high"),
+            "h1_prev_high": h1_debug.get("prev_high"),
         }
         persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: 1H conditions not met")
@@ -758,9 +768,32 @@ def handler(event, context):
 
     print(f"[DEBUG] raw_signal={raw_signal}")
     if raw_signal is None:
+        m5_reason = m5_debug.get("reason", "unknown")
+
+        nearest_support = m5_debug.get("nearest_support") or {}
+        nearest_resistance = m5_debug.get("nearest_resistance") or {}
+
         debug_info["final"] = {
             "has_signal": False,
-            "reason": "No 5M trigger.",
+            "reason": f"No 5M trigger: {m5_reason}",
+
+            # dodatkowe pola do tabelki
+            "m5_last_close": m5_debug.get("last_close"),
+            "m5_last_rsi": m5_debug.get("last_rsi"),
+            "m5_prev_rsi": m5_debug.get("prev_rsi"),
+            "m5_atr": m5_debug.get("atr"),
+            "m5_ema20": m5_debug.get("ema20"),
+            "m5_ema50": m5_debug.get("ema50"),
+            "m5_recent_high": m5_debug.get("recent_high"),
+            "m5_recent_low": m5_debug.get("recent_low"),
+
+            "m5_nearest_support_level": nearest_support.get("level"),
+            "m5_nearest_support_strength": nearest_support.get("strength"),
+            "m5_nearest_support_dist_atr": m5_debug.get("nearest_support_dist_atr"),
+
+            "m5_nearest_resistance_level": nearest_resistance.get("level"),
+            "m5_nearest_resistance_strength": nearest_resistance.get("strength"),
+            "m5_nearest_resistance_dist_atr": m5_debug.get("nearest_resistance_dist_atr"),
         }
         persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: No 5M trigger")
@@ -778,6 +811,7 @@ def handler(event, context):
         debug_info["final"] = {
             "has_signal": False,
             "reason": "Signal score too low.",
+            "score": None if full_signal is None else full_signal["score"],
         }
         persist_debug_to_dynamodb(debug_info)
         print("[DEBUG] Exiting: signal is None or score too low")

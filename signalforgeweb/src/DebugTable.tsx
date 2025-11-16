@@ -77,7 +77,15 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
 
         const json = await res.json()
         const items: DebugSnapshot[] = json.items ?? []
-        setRows(items)
+
+        // SORTOWANIE MALEJĄCO po ts
+        const sorted = items.slice().sort((a, b) => {
+          const ta = new Date(a.ts).getTime()
+          const tb = new Date(b.ts).getTime()
+          return tb - ta // malejąco
+        })
+
+        setRows(sorted)
       } catch (e: any) {
         if (e?.name !== 'AbortError') {
           setError(String(e?.message || e))
@@ -120,11 +128,21 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
       )}
 
       {!rows.length && !loading && !error && (
-        <small className="muted">Brak danych debug (jeszcze nie było wywołań Lambdy?)</small>
+        <small className="muted">
+          Brak danych debug (jeszcze nie było wywołań Lambdy?)
+        </small>
       )}
 
       {rows.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
+        <div
+          style={{
+            overflowX: 'auto',
+            maxHeight: 320, // ZMNIEJSZONA WYSOKOŚĆ
+            overflowY: 'auto',
+            border: '1px solid #e5e7eb',
+            borderRadius: 4,
+          }}
+        >
           <table
             style={{
               width: '100%',
@@ -141,6 +159,13 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
                 <th style={thStyle}>Setup 1H</th>
                 <th style={thStyle}>RSI 1H</th>
                 <th style={thStyle}>Cena 1H</th>
+
+                {/* NOWE KOLUMNY 5M */}
+                <th style={thStyle}>RSI 5M (prev → last)</th>
+                <th style={thStyle}>Cena 5M</th>
+                <th style={thStyle}>ATR 5M</th>
+                <th style={thStyle}>5M High / Low</th>
+
                 <th style={thStyle}>Sygnał</th>
                 <th style={thStyle}>Powód (why)</th>
               </tr>
@@ -149,13 +174,17 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
               {rows.map((r, idx) => {
                 const d = r.daily || {}
                 const h = r.h1 || {}
+                const m5 = r.m5 || {}
                 const runDate = new Date(r.ts)
 
                 const signalLabel = r.has_signal ? 'TAK' : 'NIE'
                 const signalColor = r.has_signal ? '#166534' : '#991b1b'
 
                 return (
-                  <tr key={`${r.ts}-${idx}`} style={idx % 2 ? rowAltStyle : undefined}>
+                  <tr
+                    key={`${r.ts}-${idx}`}
+                    style={idx % 2 ? rowAltStyle : undefined}
+                  >
                     <td style={tdStyle}>
                       {runDate.toLocaleString('pl-PL', {
                         timeZone: 'Europe/Warsaw',
@@ -163,7 +192,9 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
                       })}
                     </td>
                     <td style={tdStyle}>{d.bias || '-'}</td>
-                    <td style={tdStyle}>{d.rsi14 != null ? d.rsi14.toFixed(1) : '-'}</td>
+                    <td style={tdStyle}>
+                      {d.rsi14 != null ? d.rsi14.toFixed(1) : '-'}
+                    </td>
                     <td style={tdStyle}>
                       {d.ema20 != null && d.ema50 != null
                         ? `${d.ema20.toFixed(2)} / ${d.ema50.toFixed(2)}`
@@ -182,11 +213,46 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
                     <td style={tdStyle}>
                       {h && h.close != null ? h.close.toFixed(2) : '-'}
                     </td>
-                    <td style={{ ...tdStyle, color: signalColor, fontWeight: 600 }}>
+
+                    {/* NOWE KOMÓRKI 5M */}
+                    <td style={tdStyle}>
+                      {m5 && (m5.prev_rsi != null || m5.last_rsi != null)
+                        ? `${m5.prev_rsi?.toFixed(1) ?? '-'} → ${
+                            m5.last_rsi?.toFixed(1) ?? '-'
+                          }`
+                        : '-'}
+                    </td>
+                    <td style={tdStyle}>
+                      {m5 && m5.last_close != null
+                        ? m5.last_close.toFixed(2)
+                        : '-'}
+                    </td>
+                    <td style={tdStyle}>
+                      {m5 && m5.atr != null ? m5.atr.toFixed(3) : '-'}
+                    </td>
+                    <td style={tdStyle}>
+                      {m5 &&
+                      m5.recent_high != null &&
+                      m5.recent_low != null
+                        ? `${m5.recent_high.toFixed(2)} / ${m5.recent_low.toFixed(
+                            2,
+                          )}`
+                        : '-'}
+                    </td>
+
+                    <td
+                      style={{
+                        ...tdStyle,
+                        color: signalColor,
+                        fontWeight: 600,
+                      }}
+                    >
                       {signalLabel}
                     </td>
                     <td style={{ ...tdStyle, maxWidth: 260 }}>
-                      <span title={r.reason}>{truncate(r.reason, 80)}</span>
+                      <span title={r.reason}>
+                        {truncate(r.reason, 80)}
+                      </span>
                     </td>
                   </tr>
                 )
