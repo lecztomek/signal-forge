@@ -20,7 +20,14 @@ import type { Candle } from './transform'
 const API_URL = import.meta.env.VITE_API_URL as string
 const DEFAULT_TF = (import.meta.env.VITE_DEFAULT_TF as string) || '5m'
 const DEFAULT_LIMIT = Number(import.meta.env.VITE_DEFAULT_LIMIT || 300)
+
 const SIGNALS_API_URL = import.meta.env.VITE_SIGNALS_API_URL as string | undefined
+const DEBUG_API_URL = import.meta.env.VITE_DEBUG_API_URL as string | undefined
+
+type SrLevels = {
+  support: number[]
+  resistance: number[]
+}
 
 export default function App() {
   const [tf, setTf] = useState(DEFAULT_TF)
@@ -29,6 +36,7 @@ export default function App() {
   const [error, setError] = useState('')
   const [rows, setRows] = useState<Candle[]>([])
   const [signals, setSignals] = useState<SignalRow[]>([])
+  const [srLevels, setSrLevels] = useState<SrLevels | null>(null)
 
   // --- sygnały do markerów ---
   useEffect(() => {
@@ -53,6 +61,44 @@ export default function App() {
       } catch (e: any) {
         if (e?.name !== 'AbortError') {
           console.error('Błąd pobierania sygnałów:', e)
+        }
+      }
+    })()
+
+    return () => abort.abort()
+  }, [])
+
+  // --- poziomy S/R z debug-API (ostatni snapshot) ---
+  useEffect(() => {
+    if (!DEBUG_API_URL) {
+      console.warn('Brak VITE_DEBUG_API_URL – poziomy S/R na wykresie nie będą widoczne')
+      return
+    }
+
+    const abort = new AbortController()
+    ;(async () => {
+      try {
+        const url = new URL(DEBUG_API_URL)
+        url.searchParams.set('instrument', 'BZ=F')
+        url.searchParams.set('limit', '1') // wystarczy ostatni snapshot
+
+        const res = await fetch(url.toString(), { signal: abort.signal })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+        const json = await res.json()
+        const items = json.items ?? []
+        if (!items.length) return
+
+        const last = items[items.length - 1] // przy limit=1 i tak jest jeden
+        const sr = last.sr || {}
+
+        setSrLevels({
+          support: Array.isArray(sr.support) ? sr.support.filter((x: any) => x != null) : [],
+          resistance: Array.isArray(sr.resistance) ? sr.resistance.filter((x: any) => x != null) : [],
+        })
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          console.error('Błąd pobierania SR z debug-API:', e)
         }
       }
     })()
@@ -94,6 +140,10 @@ export default function App() {
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+
+  // price lines S/R
+  const supportLinesRef = useRef<any[]>([])
+  const resistanceLinesRef = useRef<any[]>([])
 
   // Init chart
   useEffect(() => {
@@ -146,7 +196,16 @@ export default function App() {
     return () => {
       window.removeEventListener('resize', onResize)
 
-      // ewentualnie wyczyść markery, ale nie jest to konieczne
+      // wyczyść S/R price lines
+      if (candleSeriesRef.current) {
+        const seriesAny = candleSeriesRef.current as any
+        supportLinesRef.current.forEach(line => seriesAny.removePriceLine(line))
+        resistanceLinesRef.current.forEach(line => seriesAny.removePriceLine(line))
+      }
+      supportLinesRef.current = []
+      resistanceLinesRef.current = []
+
+      // wyczyść markery
       if (markersPluginRef.current) {
         markersPluginRef.current.setMarkers([])
       }
@@ -159,7 +218,7 @@ export default function App() {
     }
   }, [])
 
-  // Update chart data + markery
+  // Update chart data + markery sygnałów
   useEffect(() => {
     if (!rows.length || !candleSeriesRef.current || !lineSeriesRef.current) return
 
@@ -213,6 +272,49 @@ export default function App() {
       markersPluginRef.current.setMarkers([])
     }
   }, [rows, tf, signals])
+
+  // Rysowanie poziomów S/R jako priceLines
+  useEffect(() => {
+    if (!candleSeriesRef.current) return
+
+    const seriesAny = candleSeriesRef.current as any
+
+    // najpierw usuń stare linie
+    supportLinesRef.current.forEach(line => seriesAny.removePriceLine(line))
+    resistanceLinesRef.current.forEach(line => seriesAny.removePriceLine(line))
+    supportLinesRef.current = []
+    resistanceLinesRef.current = []
+
+    if (!srLevels) return
+
+    // wsparcia – zielone linie
+    srLevels.support.forEach(level => {
+      if (level == null) return
+      const line = seriesAny.createPriceLine({
+        price: level,
+        color: '#16a34a',
+        lineWidth: 1,
+        lineStyle: 2, // dashed
+        axisLabelVisible: true,
+        title: 'S',
+      })
+      supportLinesRef.current.push(line)
+    })
+
+    // opory – czerwone linie
+    srLevels.resistance.forEach(level => {
+      if (level == null) return
+      const line = seriesAny.createPriceLine({
+        price: level,
+        color: '#dc2626',
+        lineWidth: 1,
+        lineStyle: 2, // dashed
+        axisLabelVisible: true,
+        title: 'R',
+      })
+      resistanceLinesRef.current.push(line)
+    })
+  }, [srLevels])
 
   return (
     <div
@@ -379,7 +481,13 @@ export default function App() {
 
           <p style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
             Środkowa część pokazuje wykres i debug, prawa kolumna – wygenerowane
-            sygnały. Na wykresie strzałki (B/S) oznaczają miejsca wejść.
+            sygnały. Na wykresie:
+            <br />
+            • zielone poziome linie – wsparcia z H1,
+            <br />
+            • czerwone poziome linie – opory z H1,
+            <br />
+            • strzałki B/S – wejścia z 5M.
           </p>
         </aside>
 
@@ -408,8 +516,7 @@ export default function App() {
       <p style={{ marginTop: 12 }}>
         <small className="muted">
           Dane z Twojego API (Lambda → DynamoDB). Świece OHLC + linia (Close) dla
-          wybranego interwału. Po lewej opis logiki generowania sygnału, pośrodku
-          wykres + debug, po prawej lista sygnałów.
+          wybranego interwału, strefy S/R z H1 i sygnały 5M naniesione na wykres.
         </small>
       </p>
     </div>
