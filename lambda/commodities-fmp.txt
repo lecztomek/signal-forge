@@ -1,0 +1,282 @@
+[
+  {
+    "symbol": "ZQUSD",
+    "name": "30 Day Fed Fund Futures",
+    "exchange": null,
+    "tradeMonth": "Nov",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ALIUSD",
+    "name": "Aluminum Futures",
+    "exchange": null,
+    "tradeMonth": "Nov",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZBUSD",
+    "name": "30 Year U.S. Treasury Bond Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZOUSX",
+    "name": "Oat Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USX"
+  },
+  {
+    "symbol": "ESUSD",
+    "name": "E-Mini S&P 500",
+    "exchange": null,
+    "tradeMonth": "Sep",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZMUSD",
+    "name": "Soybean Meal Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "GCUSD",
+    "name": "Gold Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZLUSX",
+    "name": "Soybean Oil Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USX"
+  },
+  {
+    "symbol": "KEUSX",
+    "name": "Wheat Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USX"
+  },
+  {
+    "symbol": "ZFUSD",
+    "name": "Five-Year US Treasury Note",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "SILUSD",
+    "name": "Micro Silver Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZCUSX",
+    "name": "Corn Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USX"
+  },
+  {
+    "symbol": "HEUSX",
+    "name": "Lean Hogs Futures",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USX"
+  },
+  {
+    "symbol": "PLUSD",
+    "name": "Platinum",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USD"
+  },
+  {
+    "symbol": "HGUSD",
+    "name": "Copper",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "MGCUSD",
+    "name": "Micro Gold Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "SBUSX",
+    "name": "Sugar",
+    "exchange": null,
+    "tradeMonth": "Mar",
+    "currency": "USX"
+  },
+  {
+    "symbol": "SIUSD",
+    "name": "Silver Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "CTUSX",
+    "name": "Cotton",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USX"
+  },
+  {
+    "symbol": "DXUSD",
+    "name": "US Dollar",
+    "exchange": null,
+    "tradeMonth": "Sep",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZSUSX",
+    "name": "Soybean Futures",
+    "exchange": null,
+    "tradeMonth": "Nov",
+    "currency": "USX"
+  },
+  {
+    "symbol": "LBUSD",
+    "name": "Lumber Futures",
+    "exchange": null,
+    "tradeMonth": "Nov",
+    "currency": "USD"
+  },
+  {
+    "symbol": "LEUSX",
+    "name": "Live Cattle Futures",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USX"
+  },
+  {
+    "symbol": "NGUSD",
+    "name": "Natural Gas",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USD"
+  },
+  {
+    "symbol": "CLUSD",
+    "name": "Crude Oil",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USD"
+  },
+  {
+    "symbol": "OJUSX",
+    "name": "Orange Juice",
+    "exchange": null,
+    "tradeMonth": "Nov",
+    "currency": "USX"
+  },
+  {
+    "symbol": "KCUSX",
+    "name": "Coffee",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USX"
+  },
+  {
+    "symbol": "PAUSD",
+    "name": "Palladium",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "GFUSX",
+    "name": "Feeder Cattle Futures",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USX"
+  },
+  {
+    "symbol": "ZTUSD",
+    "name": "2-Year T-Note Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZRUSD",
+    "name": "Rough Rice Futures",
+    "exchange": null,
+    "tradeMonth": "Nov",
+    "currency": "USD"
+  },
+  {
+    "symbol": "CCUSD",
+    "name": "Cocoa",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "NQUSD",
+    "name": "Nasdaq 100",
+    "exchange": null,
+    "tradeMonth": "Sep",
+    "currency": "USD"
+  },
+  {
+    "symbol": "ZNUSD",
+    "name": "10-Year T-Note Futures",
+    "exchange": null,
+    "tradeMonth": "Dec",
+    "currency": "USD"
+  },
+  {
+    "symbol": "RTYUSD",
+    "name": "Micro E-mini Russell 2000 Index Futures",
+    "exchange": null,
+    "tradeMonth": "Sep",
+    "currency": "USD"
+  },
+  {
+    "symbol": "BZUSD",
+    "name": "Brent Crude Oil",
+    "exchange": null,
+    "tradeMonth": "Sep",
+    "currency": "USD"
+  },
+  {
+    "symbol": "YMUSD",
+    "name": "Mini Dow Jones Industrial Average Index",
+    "exchange": "CMECME",
+    "tradeMonth": "Sep",
+    "currency": "USD"
+  },
+  {
+    "symbol": "DCUSD",
+    "name": "Class III Milk Futures",
+    "exchange": null,
+    "tradeMonth": "Jan",
+    "currency": "USD"
+  },
+  {
+    "symbol": "RBUSD",
+    "name": "Gasoline RBOB",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USD"
+  },
+  {
+    "symbol": "HOUSD",
+    "name": "Heating Oil",
+    "exchange": null,
+    "tradeMonth": "Oct",
+    "currency": "USD"
+  }
+]

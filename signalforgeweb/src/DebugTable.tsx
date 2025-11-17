@@ -33,6 +33,9 @@ type M5Info = {
   atr?: number
   recent_high?: number
   recent_low?: number
+  sr_level?: number
+  sr_dist_abs?: number
+  sr_dist_atr?: number
 } | null
 
 export type DebugSnapshot = {
@@ -163,7 +166,7 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
                 {/* NOWE KOLUMNY 5M */}
                 <th style={thStyle}>RSI 5M (prev → last)</th>
                 <th style={thStyle}>Cena 5M</th>
-                <th style={thStyle}>ATR 5M</th>
+                <th style={thStyle}>Odległość S/R (ATR)</th>
                 <th style={thStyle}>5M High / Low</th>
 
                 <th style={thStyle}>Sygnał</th>
@@ -228,7 +231,9 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
                         : '-'}
                     </td>
                     <td style={tdStyle}>
-                      {m5 && m5.atr != null ? m5.atr.toFixed(3) : '-'}
+                      {m5.sr_dist_atr != null
+                        ? `${m5.sr_dist_atr.toFixed(2)} ATR`
+                        : '-'}
                     </td>
                     <td style={tdStyle}>
                       {m5 &&

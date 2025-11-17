@@ -100,6 +100,9 @@ def handler(event, context):
                     "atr":        _num((m5 or {}).get("atr")),
                     "recent_high": _num((m5 or {}).get("recent_high")),
                     "recent_low":  _num((m5 or {}).get("recent_low")),
+                    "sr_level":     _num((m5 or {}).get("sr_level")),
+                    "sr_dist_abs":  _num((m5 or {}).get("sr_dist_abs")),
+                    "sr_dist_atr":  _num((m5 or {}).get("sr_dist_atr")),
                 } if m5 else None,
             })
 
