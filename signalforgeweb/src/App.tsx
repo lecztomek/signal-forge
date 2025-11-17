@@ -7,9 +7,12 @@ import {
   ColorType,
   type ISeriesApi,
   type Time,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
 } from 'lightweight-charts'
 import { DebugTable } from './DebugTable'
-import { SignalsTable } from './SignalsTable'
+import { SignalsTable, type SignalRow } from './SignalsTable'
 
 import { transformApiData } from './transform'
 import type { Candle } from './transform'
@@ -17,6 +20,7 @@ import type { Candle } from './transform'
 const API_URL = import.meta.env.VITE_API_URL as string
 const DEFAULT_TF = (import.meta.env.VITE_DEFAULT_TF as string) || '5m'
 const DEFAULT_LIMIT = Number(import.meta.env.VITE_DEFAULT_LIMIT || 300)
+const SIGNALS_API_URL = import.meta.env.VITE_SIGNALS_API_URL as string | undefined
 
 export default function App() {
   const [tf, setTf] = useState(DEFAULT_TF)
@@ -24,8 +28,39 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [rows, setRows] = useState<Candle[]>([])
+  const [signals, setSignals] = useState<SignalRow[]>([])
 
-  // Fetch
+  // --- sygnały do markerów ---
+  useEffect(() => {
+    if (!SIGNALS_API_URL) {
+      console.warn('Brak VITE_SIGNALS_API_URL – sygnały na wykresie nie będą widoczne')
+      return
+    }
+
+    const abort = new AbortController()
+    ;(async () => {
+      try {
+        const url = new URL(SIGNALS_API_URL)
+        url.searchParams.set('instrument', 'BZ=F')
+        url.searchParams.set('limit', '200') // np. 200 ostatnich sygnałów
+
+        const res = await fetch(url.toString(), { signal: abort.signal })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+        const json = await res.json()
+        const items: SignalRow[] = json.items ?? []
+        setSignals(items)
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          console.error('Błąd pobierania sygnałów:', e)
+        }
+      }
+    })()
+
+    return () => abort.abort()
+  }, [])
+
+  // --- świece / dane główne ---
   useEffect(() => {
     if (!API_URL) {
       setError('Brak VITE_API_URL – ustaw w .env')
@@ -58,6 +93,7 @@ export default function App() {
 
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
 
   // Init chart
   useEffect(() => {
@@ -97,6 +133,9 @@ export default function App() {
     })
     candleSeriesRef.current = candleSeries
 
+    // Plugin markerów powiązany z serią świec
+    markersPluginRef.current = createSeriesMarkers<Time>(candleSeries, [])
+
     const onResize = () => {
       if (!wrapRef.current) return
       chart.applyOptions({ width: wrapRef.current.clientWidth })
@@ -106,6 +145,13 @@ export default function App() {
 
     return () => {
       window.removeEventListener('resize', onResize)
+
+      // ewentualnie wyczyść markery, ale nie jest to konieczne
+      if (markersPluginRef.current) {
+        markersPluginRef.current.setMarkers([])
+      }
+      markersPluginRef.current = null
+
       chart.remove()
       chartRef.current = null
       candleSeriesRef.current = null
@@ -113,7 +159,7 @@ export default function App() {
     }
   }, [])
 
-  // Update chart data
+  // Update chart data + markery
   useEffect(() => {
     if (!rows.length || !candleSeriesRef.current || !lineSeriesRef.current) return
 
@@ -127,18 +173,52 @@ export default function App() {
 
     const lineData = rows.map(r => ({
       time: Math.floor(r.t.getTime() / 1000) as Time,
-      value: r.c, // linia po cenie zamknięcia
+      value: r.c,
     }))
 
-    candleSeriesRef.current?.setData(candleData)
-    lineSeriesRef.current?.setData(lineData)
-  }, [rows, tf])
+    candleSeriesRef.current.setData(candleData)
+    lineSeriesRef.current.setData(lineData)
+
+    // jeśli plugin markerów nie jest gotowy – nic nie robimy
+    if (!markersPluginRef.current) return
+
+    // MARKERY Z SYGNAŁÓW
+    if (signals.length) {
+      const candleTimes = new Set<Time>(candleData.map(c => c.time))
+
+      const markers: SeriesMarker<Time>[] = signals
+        .map(sig => {
+          if (!sig.ts) return null
+          const tsSec = Math.floor(new Date(sig.ts).getTime() / 1000) as Time
+          if (!candleTimes.has(tsSec)) {
+            // sygnał poza zakresem załadowanych świec
+            return null
+          }
+
+          const isBuy = sig.side === 'BUY'
+
+          return {
+            time: tsSec,
+            position: isBuy ? 'belowBar' : 'aboveBar',
+            color: isBuy ? '#16a34a' : '#dc2626',
+            shape: isBuy ? 'arrowUp' : 'arrowDown',
+            text: isBuy ? 'B' : 'S',
+          } as SeriesMarker<Time>
+        })
+        .filter(Boolean) as SeriesMarker<Time>[]
+
+      markersPluginRef.current.setMarkers(markers)
+    } else {
+      // brak sygnałów → czyścimy markery
+      markersPluginRef.current.setMarkers([])
+    }
+  }, [rows, tf, signals])
 
   return (
     <div
       className="container"
       style={{
-        maxWidth: 1800, 
+        maxWidth: 1800,
         margin: '0 auto',
         padding: 16,
       }}
@@ -202,7 +282,6 @@ export default function App() {
 
       <div
         style={{
-          // ZAMIANA flex -> grid
           display: 'grid',
           gridTemplateColumns: '320px minmax(0, 1fr) 360px',
           gap: 16,
@@ -300,7 +379,7 @@ export default function App() {
 
           <p style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
             Środkowa część pokazuje wykres i debug, prawa kolumna – wygenerowane
-            sygnały.
+            sygnały. Na wykresie strzałki (B/S) oznaczają miejsca wejść.
           </p>
         </aside>
 
@@ -326,11 +405,11 @@ export default function App() {
         </div>
       </div>
 
-
       <p style={{ marginTop: 12 }}>
         <small className="muted">
           Dane z Twojego API (Lambda → DynamoDB). Świece OHLC + linia (Close) dla
-          wybranego interwału. Po lewej opis logiki generowania sygnału.
+          wybranego interwału. Po lewej opis logiki generowania sygnału, pośrodku
+          wykres + debug, po prawej lista sygnałów.
         </small>
       </p>
     </div>
