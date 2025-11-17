@@ -21,6 +21,11 @@ const API_URL = import.meta.env.VITE_API_URL as string
 const DEFAULT_TF = (import.meta.env.VITE_DEFAULT_TF as string) || '5m'
 const DEFAULT_LIMIT = Number(import.meta.env.VITE_DEFAULT_LIMIT || 300)
 
+// nowe: dostępne instrumenty
+const INSTRUMENTS = ['BZ=F', 'GC=F'] as const
+type Instrument = (typeof INSTRUMENTS)[number]
+const DEFAULT_INSTRUMENT: Instrument = 'BZ=F'
+
 const SIGNALS_API_URL = import.meta.env.VITE_SIGNALS_API_URL as string | undefined
 const DEBUG_API_URL = import.meta.env.VITE_DEBUG_API_URL as string | undefined
 
@@ -30,6 +35,7 @@ type SrLevels = {
 }
 
 export default function App() {
+  const [instrument, setInstrument] = useState<Instrument>(DEFAULT_INSTRUMENT)
   const [tf, setTf] = useState(DEFAULT_TF)
   const [limit, setLimit] = useState<number>(DEFAULT_LIMIT)
   const [loading, setLoading] = useState(false)
@@ -49,7 +55,7 @@ export default function App() {
     ;(async () => {
       try {
         const url = new URL(SIGNALS_API_URL)
-        url.searchParams.set('instrument', 'BZ=F')
+        url.searchParams.set('instrument', instrument) // tu było BZ=F
         url.searchParams.set('limit', '200') // np. 200 ostatnich sygnałów
 
         const res = await fetch(url.toString(), { signal: abort.signal })
@@ -66,7 +72,7 @@ export default function App() {
     })()
 
     return () => abort.abort()
-  }, [])
+  }, [instrument])
 
   // --- poziomy S/R z debug-API (ostatni snapshot) ---
   useEffect(() => {
@@ -79,7 +85,7 @@ export default function App() {
     ;(async () => {
       try {
         const url = new URL(DEBUG_API_URL)
-        url.searchParams.set('instrument', 'BZ=F')
+        url.searchParams.set('instrument', instrument) // tu było BZ=F
         url.searchParams.set('limit', '1') // wystarczy ostatni snapshot
 
         const res = await fetch(url.toString(), { signal: abort.signal })
@@ -87,7 +93,10 @@ export default function App() {
 
         const json = await res.json()
         const items = json.items ?? []
-        if (!items.length) return
+        if (!items.length) {
+          setSrLevels(null)
+          return
+        }
 
         const last = items[items.length - 1] // przy limit=1 i tak jest jeden
         const sr = last.sr || {}
@@ -104,7 +113,7 @@ export default function App() {
     })()
 
     return () => abort.abort()
-  }, [])
+  }, [instrument])
 
   // --- świece / dane główne ---
   useEffect(() => {
@@ -118,6 +127,7 @@ export default function App() {
       setError('')
       try {
         const url = new URL(API_URL)
+        url.searchParams.set('instrument', instrument) // nowy parametr
         url.searchParams.set('tf', tf)
         url.searchParams.set('limit', String(limit))
         const res = await fetch(url.toString(), { signal: abort.signal })
@@ -131,7 +141,7 @@ export default function App() {
       }
     })()
     return () => abort.abort()
-  }, [tf, limit])
+  }, [tf, limit, instrument])
 
   // Chart refs
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -238,7 +248,6 @@ export default function App() {
     candleSeriesRef.current.setData(candleData)
     lineSeriesRef.current.setData(lineData)
 
-    // jeśli plugin markerów nie jest gotowy – nic nie robimy
     if (!markersPluginRef.current) return
 
     // MARKERY Z SYGNAŁÓW
@@ -337,7 +346,18 @@ export default function App() {
         <small className="muted">React + Vite · Candlesticks + Line</small>
       </header>
 
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 12, display: 'flex', gap: 12 }}>
+        <div>
+          <label>Instrument</label>
+          <select
+            value={instrument}
+            onChange={e => setInstrument(e.target.value as Instrument)}
+          >
+            <option value="BZ=F">BZ=F (Brent)</option>
+            <option value="GC=F">GC=F (Gold)</option>
+          </select>
+        </div>
+
         <div>
           <label>Interwał</label>
           <select value={tf} onChange={e => setTf(e.target.value)}>
@@ -359,11 +379,7 @@ export default function App() {
           />
         </div>
         <div style={{ display: 'flex', alignItems: 'end' }}>
-          {loading ? (
-            <small>Ładowanie…</small>
-          ) : (
-            <small className="muted">{rows.length} świec</small>
-          )}
+          {loading ? <small>Ładowanie…</small> : <small className="muted">{rows.length} świec</small>}
         </div>
       </div>
 
@@ -498,7 +514,7 @@ export default function App() {
           </div>
 
           <div className="card" style={{ padding: 12 }}>
-            <DebugTable instrument="BZ=F" limit={30} />
+            <DebugTable instrument={instrument} limit={30} />
           </div>
         </div>
 
@@ -509,14 +525,15 @@ export default function App() {
             padding: 12,
           }}
         >
-          <SignalsTable instrument="BZ=F" limit={30} />
+          <SignalsTable instrument={instrument} limit={30} />
         </div>
       </div>
 
       <p style={{ marginTop: 12 }}>
         <small className="muted">
           Dane z Twojego API (Lambda → DynamoDB). Świece OHLC + linia (Close) dla
-          wybranego interwału, strefy S/R z H1 i sygnały 5M naniesione na wykres.
+          wybranego interwału, strefy S/R z H1 i sygnały 5M naniesione na wykres dla
+          instrumentu {instrument}.
         </small>
       </p>
     </div>
