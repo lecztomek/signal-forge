@@ -2,9 +2,9 @@ import re
 import csv
 from datetime import datetime
 
-INPUT = "yahoo-brent-1d-table.txt"              # tu wklejasz całą wiadomość/tabelę
-OUTPUT = "bz_1d_for_dynamodb.csv"
-PK_VALUE = "BZ=F#1d"
+INPUT = "yahoo-gold-1d-table.txt"              # tu wklejasz całą wiadomość/tabelę
+OUTPUT = "gc_1d_for_dynamodb.csv"
+PK_VALUE = "GC=F#1d"
 
 row_pattern = re.compile(
     r"<tr[^>]*>\s*"
