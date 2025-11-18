@@ -1,0 +1,118 @@
+{
+  "mode": "test",
+  "instrument": "BZ=F",
+  "from_ts": "2025-11-17T00:00:00Z",
+  "to_ts": "2025-11-17T23:59:59Z",
+  "config": {
+    "name": "demo_strategy_v1",
+
+    "daily": {
+      "enabled": true,
+      "ema_trend": {
+        "enabled": true
+      },
+      "rsi_filter": {
+        "enabled": true,
+        "long_min": 50,
+        "short_max": 50
+      }
+    },
+
+	"h1": {
+		"enabled": true,
+		"ema_filter": { "enabled": true },
+		"rsi_filter": { "enabled": true, "long_min": 50, "short_max": 50 },
+		"structure": { "enabled": true, "long_requires_HL": true, "short_requires_LH": true },
+		"min_true": 2
+	},
+
+    "m5": {
+      "enabled": true,
+
+      "rsi_pattern_long": {
+        "enabled": true,
+        "prev_max": 40,
+        "last_min": 40
+      },
+      "rsi_pattern_short": {
+        "enabled": true,
+        "prev_min": 60,
+        "last_max": 60
+      },
+
+      "breakout_high": {
+        "enabled": true,
+        "window": 5
+      },
+      "breakout_low": {
+        "enabled": true,
+        "window": 5
+      },
+
+      "ema_filter_long": {
+        "enabled": true,
+        "must_be_above_ema20": true,
+        "must_be_above_ema50": true
+      },
+      "ema_filter_short": {
+        "enabled": true,
+        "must_be_below_ema20": true,
+        "must_be_below_ema50": true
+      },
+
+      "sr_filter_long": {
+        "enabled": true,
+        "max_dist_atr": 3.0,
+        "min_strength": 1
+      },
+      "sr_filter_short": {
+        "enabled": true,
+        "max_dist_atr": 3.0,
+        "min_strength": 1
+      },
+
+      "atr_filter": {
+        "enabled": false,
+        "min": null,
+        "max": null
+      }
+    },
+
+	"risk": {
+	  "enabled": true,
+	  "atr_source": "h1",
+	  "atr_sl_mult": 1.5,
+	  "atr_tp_mult": 3.0,
+	  "rr_target": 2.0,
+	  "min_tp_abs": 0.3,
+	  "min_rr_final": 1.5,
+
+	  "sr_exit": {
+		"enabled": true,
+		"min_strength": 1,
+		"max_sl_atr": 3.0,
+		"sl_buffer_atr": 0.3
+	  },
+
+	  "sr_tp": {
+		"enabled": true,
+		"min_strength": 1,
+		"max_tp_atr": 5.0,
+		"tp_buffer_atr": 0.5,
+		"prefer_sr_over_atr": true
+	  },
+
+	  "base_score": 60,
+	  "min_score": 70,
+	  "score_components": {
+		"rr_bonus_if_ge": 2,
+		"rr_bonus_points": 10,
+		"sr_close_bonus_points": 5,
+		"sr_close_threshold_atr": 0.5,
+		"sr_strength_cap": 10,
+		"sr_strength_weight": 2
+	  }
+	}
+
+  }
+}
