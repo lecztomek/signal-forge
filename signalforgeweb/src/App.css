@@ -40,3 +40,14 @@
 .read-the-docs {
   color: #888;
 }
+
+.layout-main {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+/* MOBILE / TABLET – wszystko jedno pod drugim */
+@media (max-width: 900px) {
+  .layout-main {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

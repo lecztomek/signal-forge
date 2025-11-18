@@ -105,7 +105,6 @@ export function DebugTable({ instrument, limit = 30 }: Props) {
         <div
           style={{
             overflowX: 'auto',
-            maxHeight: 320,
             overflowY: 'auto',
             border: '1px solid #e5e7eb',
             borderRadius: 4,

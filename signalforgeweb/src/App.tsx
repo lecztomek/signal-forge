@@ -399,135 +399,37 @@ export default function App() {
       )}
 
       <div
+        className="layout-main"
         style={{
           display: 'grid',
-          gridTemplateColumns: '320px minmax(0, 1fr) 360px',
           gap: 16,
           alignItems: 'flex-start',
           marginTop: 12,
+          gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
         }}
-      >
-        {/* LEWA KOLUMNA – OPIS STRATEGII */}
-        <aside
-          style={{
-            fontSize: 12,
-            lineHeight: 1.5,
-          }}
-        >
-          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-            Jak generujemy sygnał?
-          </h2>
-          <ol style={{ paddingLeft: 18, margin: 0 }}>
-            <li style={{ marginBottom: 6 }}>
-              <strong>Bias dzienny (1D)</strong> – liczymy EMA20, EMA50 i RSI14 na{' '}
-              przedostatniej świecy dziennej (ostatnia może być w trakcie).
-              <ul style={{ paddingLeft: 16, marginTop: 4 }}>
-                <li>LONG: EMA20 &gt; EMA50 i RSI &gt; 50</li>
-                <li>SHORT: EMA20 &lt; EMA50 i RSI &lt; 50</li>
-                <li>inaczej: BIAS = NONE → brak dalszych kroków</li>
-              </ul>
-            </li>
-            <li style={{ marginBottom: 6 }}>
-              <strong>Strefy S/R z H1</strong> – na 1H szukamy swing high/low w
-              ostatnich świecach, klastrujemy poziomy i tworzymy strefy wsparcia i
-              oporu.
-            </li>
-            <li style={{ marginBottom: 6 }}>
-              <strong>Filtr na 1H (setup)</strong> – na przedostatniej świecy 1H:
-              <ul style={{ paddingLeft: 16, marginTop: 4 }}>
-                <li>sprawdzamy EMA (dynamiczna długość), RSI14 oraz strukturę HL/LH</li>
-                <li>
-                  dla LONG: wystarczy, że spełniony jest którykolwiek z warunków
-                  (cena &gt; EMA lub RSI &gt; 50 lub higher low)
-                </li>
-                <li>
-                  dla SHORT: analogicznie (cena &lt; EMA lub RSI &lt; 50 lub lower
-                  high)
-                </li>
-                <li>jeśli warunki nie są spełnione → „1H conditions not met”</li>
-              </ul>
-            </li>
-            <li style={{ marginBottom: 6 }}>
-              <strong>Trigger na 5M</strong> – patrzymy na ostatnią świecę 5m:
-              <ul style={{ paddingLeft: 16, marginTop: 4 }}>
-                <li>liczymy RSI14, ATR14, EMA20 i EMA50 na 5m</li>
-                <li>
-                  LONG:
-                  <ul style={{ paddingLeft: 16, marginTop: 2 }}>
-                    <li>RSI przechodzi z &lt; 40 do &gt; 40</li>
-                    <li>wybicie powyżej local high z ostatnich świec</li>
-                    <li>cena powyżej EMA20 i EMA50</li>
-                    <li>
-                      cena w zasięgu ≤ 1× ATR od najbliższej strefy wsparcia z H1
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  SHORT:
-                  <ul style={{ paddingLeft: 16, marginTop: 2 }}>
-                    <li>RSI przechodzi z &gt; 60 do &lt; 60</li>
-                    <li>wybicie poniżej local low z ostatnich świec</li>
-                    <li>cena poniżej EMA20 i EMA50</li>
-                    <li>
-                      cena w zasięgu ≤ 1× ATR od najbliższej strefy oporu z H1
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  jeśli któryś warunek nie jest spełniony → brak sygnału i w tabeli
-                  zobaczysz np.:
-                  <br />
-                  <code>No 5M trigger: short_rsi_pattern_not_met</code>
-                </li>
-              </ul>
-            </li>
-            <li style={{ marginBottom: 6 }}>
-              <strong>Risk / RR / score</strong> – jeśli warunki na 5M są spełnione:
-              <ul style={{ paddingLeft: 16, marginTop: 4 }}>
-                <li>SL ustawiany w odległości 1× ATR</li>
-                <li>TP w odległości 2× ATR (RR 1:2)</li>
-                <li>liczony jest score (bazowo ~60 + bonus za S/R i RR)</li>
-                <li>
-                  sygnał trafia do tabeli sygnałów tylko jeśli score ≥ 70, inaczej
-                  „Signal score too low.”
-                </li>
-              </ul>
-            </li>
-          </ol>
-
-          <p style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
-            Środkowa część pokazuje wykres i debug, prawa kolumna – wygenerowane
-            sygnały. Na wykresie:
-            <br />
-            • zielone poziome linie – wsparcia z H1,
-            <br />
-            • czerwone poziome linie – opory z H1,
-            <br />
-            • strzałki B/S – wejścia z 5M.
-          </p>
-        </aside>
-
-        {/* ŚRODKOWA KOLUMNA – WYKRES + TABELA DEBUG */}
+>
+        {/* LEWA KOLUMNA – WYKRES + SYGNAŁY */}
         <div style={{ minWidth: 0 }}>
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
             <div ref={wrapRef} style={{ width: '100%', height: 440 }} />
           </div>
 
           <div className="card" style={{ padding: 12 }}>
-            <DebugTable instrument={instrument} limit={30} />
+            <SignalsTable instrument={instrument} limit={30} />
           </div>
         </div>
 
-        {/* PRAWA KOLUMNA – SYGNAŁY */}
+        {/* PRAWA KOLUMNA – DEBUG */}
         <div
           className="card"
           style={{
             padding: 12,
           }}
         >
-          <SignalsTable instrument={instrument} limit={30} />
+          <DebugTable instrument={instrument} limit={30} />
         </div>
       </div>
+
 
       <p style={{ marginTop: 12 }}>
         <small className="muted">
