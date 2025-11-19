@@ -1,0 +1,90 @@
+{
+  "name": "brent_neutral_mean_reversion_v1",
+  "daily": {
+    "enabled": true,
+    "max_atr_pct": 45.0,
+    "max_abs_slope_pct": 8.0,
+    "max_ema_distance_pct": 3.0,
+    "rsi_mid_min_pct": 30.0,
+    "rsi_mid_max_pct": 70.0
+  },
+  "h1": {
+    "enabled": true,
+    "max_abs_slope_pct": 25.0,
+    "max_price_distance_ema_atr": 3.0,
+    "max_atr_pct": 70.0
+  },
+  "m5": {
+    "enabled": true,
+    "min_candles": 50,
+    "atr_regime": {
+      "enabled": false,
+      "min_pct": 0.0,
+      "max_pct": 70.0
+    },
+    "score": {
+      "min_score": 25.0,
+      "rsi_points": 20.0,
+      "ema_points": 10.0,
+      "sr_points": 20.0
+    },
+    "long": {
+      "rsi_prev_min_pct": 40.0,
+      "rsi_last_max_pct": 25.0,
+      "max_price_above_ema_atr": 0.5,
+      "sr_min_strength": 1,
+      "sr_max_dist_atr": 1.0,
+      "sr_min_freshness": 0.0,
+      "sr_max_age_hours": 72.0
+    },
+    "short": {
+      "rsi_prev_max_pct": 60.0,
+      "rsi_last_min_pct": 75.0,
+      "max_price_below_ema_atr": 0.5,
+      "sr_min_strength": 1,
+      "sr_max_dist_atr": 1.0,
+      "sr_min_freshness": 0.0,
+      "sr_max_age_hours": 72.0
+    }
+  },
+  "risk": {
+    "enabled": true,
+    "atr_source": "h1",
+    "min_tp_abs": 0.3,
+    "min_rr": 1.3,
+    "sr_sl": {
+      "enabled": true,
+      "min_strength": 1,
+      "min_freshness": 0.0,
+      "max_sl_atr": 4.0,
+      "sl_buffer_atr": 0.25,
+      "tf_weights": {
+        "D1": 1.5,
+        "H4": 1.2,
+        "H1": 1.0
+      }
+    },
+    "sr_tp": {
+      "enabled": true,
+      "min_strength": 1,
+      "min_freshness": 0.0,
+      "max_tp_atr": 4.0,
+      "tp_buffer_atr": 0.35,
+      "tf_weights": {
+        "D1": 2.0,
+        "H4": 1.3,
+        "H1": 1.0
+      }
+    },
+    "base_score": 60.0,
+    "min_score": 70.0,
+    "score_components": {
+      "rr_bonus_if_ge": 2.0,
+      "rr_bonus_points": 5.0,
+      "sr_strength_weight": 2.0,
+      "sr_strength_cap": 10.0,
+      "sr_close_bonus_points": 5.0,
+      "sr_close_threshold_atr": 1.0
+    }
+  }
+}
