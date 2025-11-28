@@ -1,7 +1,0 @@
-python run_neutral_strategy_from_snapshots_csv.py --snapshots_csv brent_snapshots_5m.csv --config_json neutral_strategy_config.json --output_signals_csv neutral_signals.csv --debug_csv neutral_debug.csv --stats_csv neutral_stats.csv
-
-python backtest_from_signals_and_m5.py --signals neutral_signals.csv --candles brent_5m.csv --out-trades neutral_trades_results.csv
-
-python optimize_neutral_strategy.py --snapshots_csv brent_snapshots_5m_30.csv --candles_csv brent_5m.csv --base_config_json neutral_strategy_config.json --instrument BZ=F --min_trades 30 --top_n 10
-
-python run_neutral_flag_strategy_from_snapshots.py --snapshots_csv brent_snapshots_5m_30_flags.csv --config_json config_flag_neutral.json --output_signals_csv neutral_flag_signals.csv --instrument BZ=F --debug_csv neutral_flag_debug_log.csv --stats_csv neutral_flag_debug_stats.csv
