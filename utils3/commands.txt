@@ -1,0 +1,1 @@
+python run_wf.py --directory . --snapshots-glob "1brent_snapshots_5m_100_*.csv" --candles-5m brent_5m.csv --train-len 2 --test-len 1
